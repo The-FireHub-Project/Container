@@ -1,0 +1,41 @@
+cff-version: 1.2.0
+message: If you use this software, please cite it using the metadata from this file.
+title: The FireHub Project - Kernel
+abstract: A modular dependency injection container for The FireHub Project, providing service registration, dependency resolution, lifecycle management, and extensible service definitions.
+type: software
+license: Apache-2.0
+
+url: "https://the-firehub-project.github.io/container"
+repository-code: "https://github.com/The-FireHub-Project/Container"
+repository-artifact: "https://packagist.org/packages/firehub/Container"
+
+authors:
+  - family-names: Galić
+    given-names: Danijel
+    alias: dieselxxx
+    orcid: "https://orcid.org/0000-0002-4447-1352"
+    website: "https://github.com/dieselxxx"
+
+  - name: The FireHub Project
+    address: "Privalj b.b. Kočerin"
+    post-code: 88226
+    city: "Široki Brijeg"
+    region: "Hercegovina"
+    country: "BA"
+    email: "danijel.galic@outlook.com"
+    tel: +38763407111
+    website: "https://the-firehub-project.github.io"
+
+keywords:
+  - php
+  - framework
+  - di-container
+  - firehub
+  - inversion-of-control
+
+identifiers:
+  - type: url
+    value: "https://github.com/The-FireHub-Project/Container"
+    description: The GitHub URL of this version.
+  - type: other
+    value: "packagist:firehub/container"

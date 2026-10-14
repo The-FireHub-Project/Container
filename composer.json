@@ -1,0 +1,67 @@
+{
+  "name": "the-firehub-project/container",
+  "description": "A modular dependency injection container for The FireHub Project, providing service registration, dependency resolution, lifecycle management, and extensible service definitions.",
+  "type": "library",
+  "keywords": ["php", "framework", "kernel", "firehub", "dependency-injection", "lifecycle", "bootstrap"],
+  "homepage": "https://the-firehub-project.github.io/kernel",
+  "license": "Apache-2.0",
+  "require": {
+    "php": "^8.5",
+
+    "the-firehub-project/runtime": ">=0.1.0 <1.0.0",
+    "the-firehub-project/core-standard": "dev-develop"
+  },
+  "require-dev": {
+    "phpstan/phpstan": "^2.0",
+    "the-firehub-project/phpstan-rules": "dev-develop",
+
+    "the-firehub-project/testing": "dev-develop"
+  },
+  "minimum-stability": "stable",
+  "autoload": {
+    "psr-4": {
+      "FireHub\\Container\\": "src"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "FireHub\\Tests\\Container\\": "tests/"
+    }
+  },
+  "authors": [
+    {
+      "name": "Danijel Galić",
+      "email": "danijel.galic@outlook.com",
+      "homepage": "https://github.com/dieselxxx",
+      "role": "Owner"
+    }
+  ],
+  "support": {
+    "email": "danijel.galic@outlook.com",
+    "issues": "https://github.com/The-FireHub-Project/Container/issues",
+    "forum": "https://github.com/orgs/The-FireHub-Project/discussions",
+    "wiki": "https://github.com/The-FireHub-Project/Container/wiki",
+    "source": "https://github.com/The-FireHub-Project/Container",
+    "docs": "https://the-firehub-project.github.io/Container",
+    "security": "https://github.com/The-FireHub-Project/Container/security/policy"
+  },
+  "funding": [
+    {
+      "type": "github",
+      "url": "https://github.com/sponsors/The-FireHub-Project"
+    }
+  ],
+  "config": {
+    "prepend-autoloader": false,
+    "optimize-autoloader": true,
+    "platform-check": true
+  },
+  "extra": {
+    "firehub": {
+      "layer": "runtime",
+      "edition": "standard",
+      "role": "foundation",
+      "criticality": "critical"
+    }
+  }
+}
