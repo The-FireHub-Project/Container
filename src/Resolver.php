@@ -70,10 +70,17 @@ final readonly class Resolver implements ResolverBoundary {
     private DependencyPlanCache $plans;
 
     /**
+     * ### Reusable dependency autowirer
+     * @since 1.0.0
+     */
+    private Autowirer $autowirer;
+
+    /**
      * ### Constructor
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Resolver::has() To check for service existence.
+     * @uses \FireHub\Container\Resolver::get() To retrieve a service definition.
      * @uses \FireHub\Container\Registry::implementations() To get all registered implementations.
      *
      * @param \FireHub\Container\Registry $registry <p>
@@ -105,6 +112,15 @@ final readonly class Resolver implements ResolverBoundary {
         $this->plans = new DependencyPlanCache(
             $this->metadata,
             $this->matcher
+        );
+
+        $this->autowirer = new Autowirer(
+            fn (string $id, ResolutionContext $context):object =>
+            $this->resolve($id, $context),
+            fn (string $id):bool => $this->has($id),
+            $this->matcher,
+            $this->selector,
+            $this->plans
         );
 
     }
@@ -523,8 +539,6 @@ final readonly class Resolver implements ResolverBoundary {
      * Automatically resolves registered constructor dependencies while preserving the current resolution context.
      * @since 1.0.0
      *
-     * @uses \FireHub\Container\Resolver::resolve() To resolve a service.
-     * @uses \FireHub\Container\Resolver::has() To check for service existence.
      * @uses \FireHub\Container\Internal\Autowirer::construct() To construct an instance using autowiring.
      *
      * @param class-string $class <p>
@@ -543,15 +557,7 @@ final readonly class Resolver implements ResolverBoundary {
      */
     private function autowire (string $class, ResolutionContext $context):object {
 
-        $autowirer = new Autowirer(
-            fn (string $id):object => $this->resolve($id, $context),
-            fn (string $id):bool => $this->has($id),
-            $this->matcher,
-            $this->selector,
-            $this->plans
-        );
-
-        return $autowirer->construct($class);
+        return $this->autowirer->construct($class, $context);
 
     }
 

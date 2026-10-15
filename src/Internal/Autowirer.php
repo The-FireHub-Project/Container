@@ -33,7 +33,7 @@ final readonly class Autowirer {
      * ### Constructor
      * @since 1.0.0
      *
-     * @param Closure(class-string):object $resolve <p>
+     * @param Closure(class-string, \FireHub\Container\Internal\ResolutionContext):object $resolve <p>
      * Context-aware service resolver.
      * </p>
      * @param Closure(class-string):bool $has <p>
@@ -71,6 +71,9 @@ final readonly class Autowirer {
      * @param class-string $class <p>
      * Concrete service class.
      * </p>
+     * @param \FireHub\Container\Internal\ResolutionContext $context <p>
+     * Active dependency resolution context.
+     * </p>
      *
      * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter is not optional and cannot
      * be resolved.
@@ -79,7 +82,7 @@ final readonly class Autowirer {
      *
      * @return object Constructed service instance.
      */
-    public function construct (string $class):object {
+    public function construct (string $class, ResolutionContext $context):object {
 
         $plan = $this->plans->get($class);
 
@@ -94,7 +97,7 @@ final readonly class Autowirer {
         $arguments = [];
 
         foreach ($plan->parameters as $parameter)
-            $arguments[] = $this->resolveParameter($parameter);
+            $arguments[] = $this->resolveParameter($parameter, $context);
 
         return $metadata->reflection->newInstanceArgs($arguments);
 
@@ -114,6 +117,9 @@ final readonly class Autowirer {
      * @param \FireHub\Container\Internal\ParameterPlan $plan <p>
      * Compiled constructor parameter plan.
      * </p>
+     * @param \FireHub\Container\Internal\ResolutionContext $context <p>
+     * Active resolution context.
+     * </p>
      *
      * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter is not optional and cannot
      * be resolved.
@@ -121,7 +127,7 @@ final readonly class Autowirer {
      *
      * @return mixed Resolved argument.
      */
-    private function resolveParameter (ParameterPlan $plan):mixed {
+    private function resolveParameter (ParameterPlan $plan, ResolutionContext $context):mixed {
 
         $id = $plan->id;
 
@@ -141,7 +147,7 @@ final readonly class Autowirer {
                 ($this->has)($id)
                 || $this->matcher->isConstructible($id)
             ))
-            return ($this->resolve)($id);
+            return ($this->resolve)($id, $context);
 
         if ($plan->hasDefault)
             return $plan->default;
