@@ -27,6 +27,8 @@ use FireHub\Container\Exception\ {
  *
  * The registry does not construct service instances, execute factories, or manage service lifetimes.
  * @since 1.0.0
+ *
+ * @internal
  */
 final class Registry {
 
