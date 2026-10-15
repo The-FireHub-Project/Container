@@ -46,8 +46,23 @@ use ReflectionClass, ReflectionException;
 final readonly class Resolver implements ResolverBoundary {
 
     /**
+     * ### Dependency type matcher
+     * @since 1.0.0
+     */
+    private TypeMatcher $matcher;
+
+    /**
+     * ### Dependency candidate selector
+     * @since 1.0.0
+     */
+    private CandidateSelector $selector;
+
+    /**
      * ### Constructor
      * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Resolver::has() To check for service existence.
+     * @uses \FireHub\Container\Registry::implementations() To get all registered implementations.
      *
      * @param \FireHub\Container\Registry $registry <p>
      * Registry containing service definitions.
@@ -61,7 +76,17 @@ final readonly class Resolver implements ResolverBoundary {
     public function __construct (
         private Registry $registry,
         private InstanceStore $singletons
-    ) {}
+    ) {
+
+        $this->matcher = new TypeMatcher;
+
+        $this->selector = new CandidateSelector(
+            $this->matcher,
+            fn (string $id):bool => $this->has($id),
+            fn ():iterable => $this->registry->implementations()
+        );
+
+    }
 
     /**
      * ### Gets a registered service
@@ -84,6 +109,9 @@ final readonly class Resolver implements ResolverBoundary {
      * with its registered identifier.
      * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
      * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
+     * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
+     * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
      *
      * @return TService Resolved service instance.
      */
@@ -121,6 +149,8 @@ final readonly class Resolver implements ResolverBoundary {
      * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
      * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
      * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
+     * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
      *
      * @return TService Resolved service.
      */
@@ -191,8 +221,8 @@ final readonly class Resolver implements ResolverBoundary {
      * with its registered identifier.
      * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
      * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
-     * @throws \FireHub\Container\Exception\ServiceNotFoundException If the identifier is not an instantiable class.
      * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
      *
      * @return TService Resolved service.
      */
@@ -503,21 +533,11 @@ final readonly class Resolver implements ResolverBoundary {
      */
     private function autowire (string $class, ResolutionContext $context):object {
 
-        $matcher = new TypeMatcher;
-
-        $has = fn (string $id):bool => $this->has($id);
-
-        $selector = new CandidateSelector(
-            $matcher,
-            $has,
-            fn ():iterable => $this->registry->implementations()
-        );
-
         $autowirer = new Autowirer(
             fn (string $id):object => $this->resolve($id, $context),
-            $has,
-            $matcher,
-            $selector
+            fn (string $id):bool => $this->has($id),
+            $this->matcher,
+            $this->selector
         );
 
         return $autowirer->construct($class);
