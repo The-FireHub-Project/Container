@@ -14,6 +14,7 @@
 namespace FireHub\Container\Internal;
 
 use FireHub\Container\Exception\ServiceInstantiationException;
+use FireHub\Runtime;
 use Closure, ReflectionClass, ReflectionException, ReflectionNamedType, ReflectionParameter;
 
 /**
@@ -98,8 +99,73 @@ final readonly class Autowirer {
     }
 
     /**
+     * ### Checks whether a dependency can be resolved
+     *
+     * Determines whether the dependency has an explicit registration or represents an implicitly constructible
+     * concrete class.
+     *
+     * This check does not instantiate the dependency.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Runtime\ObjectModel\Inspection::isClass() To check if the identifier is a class.
+     *
+     * @param class-string $id <p>
+     * Dependency identifier.
+     * </p>
+     *
+     * @return bool True if resolution can be attempted.
+     */
+    private function canResolve (string $id):bool {
+
+        if (($this->has)($id))
+            return true;
+
+        if (!Runtime\ObjectModel\Inspection::isClass($id))
+            return false;
+
+        return new ReflectionClass($id)->isInstantiable();
+
+    }
+
+    /**
+     * ### Resolves a parameter class identifier
+     *
+     * Resolves the declared class or interface type of the constructor parameter.
+     *
+     * Relative class types are resolved against the class declaring the constructor. Built-in types are not
+     * considered service identifiers.
+     * @since 1.0.0
+     *
+     * @param ReflectionParameter $parameter <p>
+     * Constructor parameter.
+     * </p>
+     * @param ReflectionNamedType $type <p>
+     * Declared parameter type.
+     * </p>
+     *
+     * @return null|class-string Resolved service identifier, or null for built-in types.
+     */
+    private function classId (ReflectionParameter $parameter, ReflectionNamedType $type):?string {
+
+        if ($type->isBuiltin())
+            return null;
+
+        /** @var null|class-string */
+        return match ($type->getName()) {
+            'self' => $parameter->getDeclaringClass()?->getName(),
+            'parent' => $parameter->getDeclaringClass()?->getParentClass()?->getName(), // @phpstan-ignore method.nonObject
+            default => $type->getName()
+        };
+
+    }
+
+    /**
      * ### Resolves a constructor parameter
      * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\Autowirer::canResolve() Checks if a dependency can be resolved.
+     * @uses \FireHub\Container\Internal\Autowirer::resolve() Resolves a dependency.
+     * @uses \FireHub\Container\Internal\Autowirer::classId() Resolves a parameter class identifier.
      *
      * @param ReflectionParameter $parameter <p>
      * Constructor parameter.
@@ -124,14 +190,9 @@ final readonly class Autowirer {
 
         if ($type instanceof ReflectionNamedType && !$type->isBuiltin()) {
 
-            /** @var class-string $id */
-            $id = match ($type->getName()) {
-                'self' => $parameter->getDeclaringClass()?->getName(),
-                'parent' => $parameter->getDeclaringClass()?->getParentClass()?->getName(), // @phpstan-ignore method.nonObject
-                default => $type->getName()
-            };
+            $id = $this->classId($parameter, $type);
 
-            if ($id !== null && ($this->has)($id))
+            if ($id !== null && $this->canResolve($id))
                 return ($this->resolve)($id);
 
         }

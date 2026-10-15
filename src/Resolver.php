@@ -22,9 +22,10 @@ use FireHub\Container\Internal\ {
     Autowirer, ContextualResolver, InstanceStore, ResolutionContext, ScopeState
 };
 use FireHub\Container\Exception\ {
-    ScopeRequiredException, ServiceTypeMismatchException, UnsupportedDefinitionException
+    ScopeRequiredException, ServiceNotFoundException, ServiceTypeMismatchException, UnsupportedDefinitionException
 };
-use ReflectionException;
+use FireHub\Runtime;
+use ReflectionClass, ReflectionException;
 
 /**
  * ### Resolves registered dependency injection services
@@ -169,10 +170,12 @@ final readonly class Resolver implements ResolverBoundary {
      * ### Resolves a service within the specified context
      * @since 1.0.0
      *
+     * @uses \FireHub\Container\Registry::has() To check for service existence.
      * @uses \FireHub\Container\Registry::get() To retrieve the service definition.
      * @uses \FireHub\Container\Internal\ResolutionStack::enter() To mark the service as being currently being resolved.
      * @uses \FireHub\Container\Internal\ResolutionStack::leave() To remove the service from the resolution stack.
      * @uses \FireHub\Container\Resolver::resolveService() To resolve a service.
+     * @uses \FireHub\Container\Resolver::resolveImplicit() To resolve an implicitly constructed service.
      *
      * @template TService of object
      *
@@ -188,10 +191,15 @@ final readonly class Resolver implements ResolverBoundary {
      * with its registered identifier.
      * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
      * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If the identifier is not an instantiable class.
+     * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
      *
      * @return TService Resolved service.
      */
     private function resolve (string $id, ResolutionContext $context):object {
+
+        if (!$this->registry->has($id))
+            return $this->resolveImplicit($id, $context);
 
         $definition = $this->registry->get($id);
 
@@ -291,6 +299,80 @@ final readonly class Resolver implements ResolverBoundary {
                 throw new ServiceTypeMismatchException;
 
             $store?->set($id, $instance);
+
+            return $instance;
+
+        } finally {
+
+            $context->stack->leave();
+
+        }
+
+    }
+
+    /**
+     * ### Resolves an implicitly constructed service
+     *
+     * Automatically constructs an unregistered concrete class using constructor dependency injection.
+     *
+     * Implicit services are never cached or registered and always use transient lifetime semantics.
+     *
+     * Abstract classes and interfaces cannot be implicitly constructed.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\ResolutionStack::enter() To mark the service as being currently being resolved.
+     * @uses \FireHub\Container\Internal\ResolutionStack::leave() To remove the service from the resolution stack.
+     * @uses \FireHub\Container\Resolver::autowire() To construct an instance using autowiring.
+     * @uses \FireHub\Runtime\ObjectModel\Inspection::isClass() To check if the identifier is a class.
+     *
+     * @template TService of object
+     *
+     * @param class-string<TService> $id <p>
+     * Unregistered concrete class identifier.
+     * </p>
+     * @param \FireHub\Container\Internal\ResolutionContext $context <p>
+     * Active resolution context.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If the identifier is not an instantiable class.
+     * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
+     * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the constructed instance does not match
+     * the identifier.
+     *
+     * @return TService Constructed service.
+     */
+    private function resolveImplicit (string $id, ResolutionContext $context):object {
+
+        if (!Runtime\ObjectModel\Inspection::isClass($id))
+            throw new ServiceNotFoundException;
+
+        try {
+
+            $reflection = new ReflectionClass($id);
+
+        } catch (ReflectionException $exception) { // @phpstan-ignore catch.neverThrown
+
+            throw new ServiceNotFoundException(
+                previous: $exception
+            );
+
+        }
+
+        if (!$reflection->isInstantiable())
+            throw new ServiceNotFoundException;
+
+        $context->stack->enter($id);
+
+        try {
+
+            $instance = $this->autowire($id, $context);
+
+            if (!$instance instanceof $id)
+                throw new ServiceTypeMismatchException(
+                    context: [
+                        'instance' => $instance
+                    ]
+                );
 
             return $instance;
 
