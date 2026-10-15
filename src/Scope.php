@@ -95,7 +95,6 @@ final readonly class Scope implements ResolverBoundary {
      * with its registered identifier.
      * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
      * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
-     * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
      *
      * @return TService Resolved service.
      */
@@ -178,6 +177,20 @@ final readonly class Scope implements ResolverBoundary {
             $this->close();
 
         }
+
+    }
+
+    /**
+     * ### Checks whether the scope is closed
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\ScopeState::isClosed() To check the scope lifecycle state.
+     *
+     * @return bool True if the scope is closed, false otherwise.
+     */
+    public function isClosed ():bool {
+
+        return $this->state->isClosed();
 
     }
 

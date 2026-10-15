@@ -109,7 +109,7 @@ final class ScopeState {
         if ($this->closed)
             return;
 
-        if ($this->active > 0)
+        if ($this->running || $this->active > 0)
             throw new ScopeActiveException;
 
         $this->closed = true;

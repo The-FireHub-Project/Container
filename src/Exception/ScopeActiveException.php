@@ -16,11 +16,14 @@ namespace FireHub\Container\Exception;
 use FireHub\Core\Exception\RuntimeException;
 
 /**
- * ### Thrown when closing a scope during active service resolution
+ * ### Thrown when a scope operation conflicts with active execution
+ *
+ * Indicates that the scope cannot be closed or executed because another
+ * resolution or execution operation is currently active.
  * @since 1.0.0
  */
 final class ScopeActiveException extends RuntimeException {
 
-    protected const string DEFAULT_MESSAGE = 'Cannot close a dependency injection scope while service resolution is active.';
+    protected const string DEFAULT_MESSAGE = 'The dependency injection scope is currently active.';
 
 }
