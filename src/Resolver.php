@@ -19,8 +19,8 @@ use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance, Service
 };
 use FireHub\Container\Internal\ {
-    Autowirer, CandidateSelector, ConstructorMetadataCache, ContextualResolver, InstanceStore, ResolutionContext,
-    ScopeState, TypeMatcher
+    Autowirer, CandidateSelector, ConstructorMetadataCache, ContextualResolver, DependencyPlanCache, InstanceStore,
+    ResolutionContext, ScopeState, TypeMatcher
 };
 use FireHub\Container\Exception\ {
     ScopeRequiredException, ServiceNotFoundException, ServiceTypeMismatchException, UnsupportedDefinitionException
@@ -64,6 +64,12 @@ final readonly class Resolver implements ResolverBoundary {
     private ConstructorMetadataCache $metadata;
 
     /**
+     * ### Compiled dependency plan cache
+     * @since 1.0.0
+     */
+    private DependencyPlanCache $plans;
+
+    /**
      * ### Constructor
      * @since 1.0.0
      *
@@ -94,6 +100,11 @@ final readonly class Resolver implements ResolverBoundary {
             $this->matcher,
             fn (string $id):bool => $this->has($id),
             fn ():iterable => $this->registry->implementations()
+        );
+
+        $this->plans = new DependencyPlanCache(
+            $this->metadata,
+            $this->matcher
         );
 
     }
@@ -537,7 +548,7 @@ final readonly class Resolver implements ResolverBoundary {
             fn (string $id):bool => $this->has($id),
             $this->matcher,
             $this->selector,
-            $this->metadata
+            $this->plans
         );
 
         return $autowirer->construct($class);

@@ -14,16 +14,15 @@
 namespace FireHub\Container\Internal;
 
 use FireHub\Container\Exception\ServiceInstantiationException;
-use Closure, ReflectionClass, ReflectionException, ReflectionNamedType, ReflectionParameter,
-    ReflectionIntersectionType, ReflectionUnionType;
+use Closure, ReflectionIntersectionType, ReflectionUnionType;
 
 /**
- * ### Automatically constructs registered services
+ * ### Constructs services using compiled dependency plans
  *
- * Resolves constructor dependencies using registered service definitions.
+ * Executes cached dependency construction plans to instantiate services and resolve their constructor dependencies.
  *
- * Only class and interface dependencies are supported. Scalar, union, and intersection types require explicit
- * factory definitions.
+ * Static parameter analysis is performed by the dependency plan cache, while service availability and candidate
+ * selection are evaluated dynamically within the active resolution context.
  * @since 1.0.0
  *
  * @internal
@@ -46,8 +45,8 @@ final readonly class Autowirer {
      * @param \FireHub\Container\Internal\CandidateSelector $selector <p>
      * Dependency candidate selector.
      * </p>
-     * @param \FireHub\Container\Internal\ConstructorMetadataCache $metadata <p>
-     * Shared constructor metadata cache.
+     * @param \FireHub\Container\Internal\DependencyPlanCache $plans <p>
+     * Shared dependency plan cache.
      * </p>
      *
      * @return void
@@ -57,20 +56,16 @@ final readonly class Autowirer {
         private Closure $has,
         private TypeMatcher $matcher,
         private CandidateSelector $selector,
-        private ConstructorMetadataCache $metadata
+        private DependencyPlanCache $plans
     ) {}
 
     /**
-     * ### Constructs a service with resolved dependencies
+     * ### Constructs a service using its compiled dependency plan
      *
-     * Inspects the constructor and resolves registered or implicitly constructible object dependencies.
-     *
-     * Parameters with default values use their defaults when no eligible dependency is available.
-     * Nullable parameters without default values remain required.
-     * Variadic parameters are left empty unless explicitly supplied through a future binding mechanism.
+     * Resolves constructor dependencies dynamically while reusing previously compiled parameter information.
      * @since 1.0.0
      *
-     * @uses \FireHub\Container\Internal\Autowirer::resolveParameter() To resolve a constructor parameter.
+     * @uses \FireHub\Container\Internal\DependencyPlanCache::get() To retrieve the compiled construction plan.
      * @uses \FireHub\Container\Internal\ConstructorMetadataCache::get() To get constructor metadata.
      *
      * @param class-string $class <p>
@@ -86,7 +81,9 @@ final readonly class Autowirer {
      */
     public function construct (string $class):object {
 
-        $metadata = $this->metadata->get($class);
+        $plan = $this->plans->get($class);
+
+        $metadata = $plan->metadata;
 
         if (!$metadata->instantiable)
             throw new ServiceInstantiationException;
@@ -96,32 +93,26 @@ final readonly class Autowirer {
 
         $arguments = [];
 
-        foreach ($metadata->parameters as $parameter) {
-
-            if ($parameter->isVariadic())
-                continue;
-
+        foreach ($plan->parameters as $parameter)
             $arguments[] = $this->resolveParameter($parameter);
-
-        }
 
         return $metadata->reflection->newInstanceArgs($arguments);
 
     }
 
     /**
-     * ### Resolves a constructor parameter
+     * ### Resolves a compiled constructor parameter
+     *
+     * Executes the precompiled parameter plan while evaluating dependency availability and composite candidate
+     * selection against the current service registrations.
      * @since 1.0.0
      *
-     * @uses \FireHub\Container\Internal\Autowirer::resolve() Resolves a dependency.
-     * @uses \FireHub\Container\Internal\TypeMatcher::classId() Resolves a parameter class identifier.
-     * @uses \FireHub\Container\Internal\TypeMatcher::unionId() Resolves a union dependency identifier.
-     * @uses \FireHub\Container\Internal\CandidateSelector::union() Resolves a union dependency.
-     * @uses \FireHub\Container\Internal\CandidateSelector::intersection() Resolves an intersection dependency.
-     * @uses \FireHub\Container\Internal\TypeMatcher::isConstructible() Checks if a class is implicitly constructible.
+     * @uses \FireHub\Container\Internal\CandidateSelector::union() To select a union dependency.
+     * @uses \FireHub\Container\Internal\CandidateSelector::intersection() To select an intersection dependency.
+     * @uses \FireHub\Container\Internal\TypeMatcher::isConstructible() To check implicit constructibility.
      *
-     * @param ReflectionParameter $parameter <p>
-     * Constructor parameter.
+     * @param \FireHub\Container\Internal\ParameterPlan $plan <p>
+     * Compiled constructor parameter plan.
      * </p>
      *
      * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter is not optional and cannot
@@ -130,19 +121,21 @@ final readonly class Autowirer {
      *
      * @return mixed Resolved argument.
      */
-    private function resolveParameter (ReflectionParameter $parameter):mixed {
+    private function resolveParameter (ParameterPlan $plan):mixed {
 
-        $type = $parameter->getType();
+        $id = $plan->id;
 
-        $id = match (true) {
-            $type instanceof ReflectionNamedType =>
-                $this->matcher->classId($parameter, $type),
-            $type instanceof ReflectionUnionType =>
-                $this->selector->union($parameter, $type),
-            $type instanceof ReflectionIntersectionType =>
-                $this->selector->intersection($parameter, $type),
-            default => null
-        };
+        if ($plan->composite instanceof ReflectionUnionType)
+            $id = $this->selector->union(
+                $plan->parameter,
+                $plan->composite
+            );
+
+        elseif ($plan->composite instanceof ReflectionIntersectionType)
+            $id = $this->selector->intersection(
+                $plan->parameter,
+                $plan->composite
+            );
 
         if ($id !== null && (
                 ($this->has)($id)
@@ -150,8 +143,12 @@ final readonly class Autowirer {
             ))
             return ($this->resolve)($id);
 
-        if ($parameter->isDefaultValueAvailable())
-            return $parameter->getDefaultValue();
+        if ($plan->hasDefault)
+            return $plan->default;
+
+        $parameter = $plan->parameter;
+
+        $type = $parameter->getType();
 
         throw new ServiceInstantiationException(
             context: [
@@ -161,7 +158,7 @@ final readonly class Autowirer {
                 'type' => $type?->__toString(),
                 'nullable' => $type?->allowsNull(),
                 'optional' => $parameter->isOptional(),
-                'has_default' => $parameter->isDefaultValueAvailable()
+                'has_default' => $plan->hasDefault
             ]
         );
 
