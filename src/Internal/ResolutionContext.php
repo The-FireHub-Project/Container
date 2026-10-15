@@ -61,6 +61,9 @@ final readonly class ResolutionContext {
      */
     public function root ():self {
 
+        if ($this->scoped === null)
+            return $this;
+
         return new self(
             stack: $this->stack,
             scope: $this->scope

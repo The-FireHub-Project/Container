@@ -35,10 +35,16 @@ final class ResolutionStack {
     private array $stack = [];
 
     /**
-     * ### Starts resolving a service
+     * ### Active service identifiers
      * @since 1.0.0
      *
-     * @uses \FireHub\Runtime\Arr\Inspection::inArray() Checks if the service is already being resolved.
+     * @var array<class-string, true>
+     */
+    private array $active = [];
+
+    /**
+     * ### Starts resolving a service
+     * @since 1.0.0
      *
      * @param class-string $id <p>
      * Service identifier.
@@ -50,7 +56,7 @@ final class ResolutionStack {
      */
     public function enter (string $id):void {
 
-        if (Runtime\Arr\Inspection::inArray($this->stack, $id))
+        if (isset($this->active[$id]))
             throw new CircularDependencyException(
                 context: [
                     'stack' => $this->stack
@@ -58,6 +64,8 @@ final class ResolutionStack {
             );
 
         $this->stack[] = $id;
+
+        $this->active[$id] = true;
 
     }
 
@@ -71,7 +79,10 @@ final class ResolutionStack {
      */
     public function leave ():void {
 
-        Runtime\Arr\Mutation::pop($this->stack);
+        $id = Runtime\Arr\Mutation::pop($this->stack);
+
+        if ($id !== null)
+            unset($this->active[$id]);
 
     }
 
