@@ -7,7 +7,7 @@
  * @copyright 2026-present The FireHub Project - All rights reserved
  * @license https://opensource.org/license/Apache-2-0 Apache License, Version 2.0
  *
- * @php-version >=8.2
+ * @php-version >=8.5
  * @package Container
  */
 
@@ -46,12 +46,18 @@ final readonly class Autowirer {
      * @param \FireHub\Container\Internal\CandidateSelector $selector <p>
      * Dependency candidate selector.
      * </p>
+     * @param \FireHub\Container\Internal\ConstructorMetadataCache $metadata <p>
+     * Shared constructor metadata cache.
+     * </p>
+     *
+     * @return void
      */
     public function __construct (
         private Closure $resolve,
         private Closure $has,
         private TypeMatcher $matcher,
-        private CandidateSelector $selector
+        private CandidateSelector $selector,
+        private ConstructorMetadataCache $metadata
     ) {}
 
     /**
@@ -63,6 +69,9 @@ final readonly class Autowirer {
      * Nullable parameters without default values remain required.
      * Variadic parameters are left empty unless explicitly supplied through a future binding mechanism.
      * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\Autowirer::resolveParameter() To resolve a constructor parameter.
+     * @uses \FireHub\Container\Internal\ConstructorMetadataCache::get() To get constructor metadata.
      *
      * @param class-string $class <p>
      * Concrete service class.
@@ -77,31 +86,17 @@ final readonly class Autowirer {
      */
     public function construct (string $class):object {
 
-        try {
+        $metadata = $this->metadata->get($class);
 
-            $reflection = new ReflectionClass($class);
+        if (!$metadata->instantiable)
+            throw new ServiceInstantiationException;
 
-        } catch (ReflectionException $exception) { // @phpstan-ignore catch.neverThrown
-
-            throw new ServiceInstantiationException(
-                previous: $exception
-            );
-
-        }
-
-        if (!$reflection->isInstantiable())
-            throw new ServiceInstantiationException(
-                context: ['class' => $class]
-            );
-
-        $constructor = $reflection->getConstructor();
-
-        if ($constructor === null)
-            return $reflection->newInstance();
+        if (!$metadata->hasConstructor)
+            return $metadata->reflection->newInstance();
 
         $arguments = [];
 
-        foreach ($constructor->getParameters() as $parameter) {
+        foreach ($metadata->parameters as $parameter) {
 
             if ($parameter->isVariadic())
                 continue;
@@ -110,7 +105,7 @@ final readonly class Autowirer {
 
         }
 
-        return $reflection->newInstanceArgs($arguments);
+        return $metadata->reflection->newInstanceArgs($arguments);
 
     }
 

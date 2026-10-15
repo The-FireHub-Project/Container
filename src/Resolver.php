@@ -19,13 +19,13 @@ use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance, Service
 };
 use FireHub\Container\Internal\ {
-    Autowirer, CandidateSelector, ContextualResolver, InstanceStore, ResolutionContext, ScopeState, TypeMatcher
+    Autowirer, CandidateSelector, ConstructorMetadataCache, ContextualResolver, InstanceStore, ResolutionContext,
+    ScopeState, TypeMatcher
 };
 use FireHub\Container\Exception\ {
     ScopeRequiredException, ServiceNotFoundException, ServiceTypeMismatchException, UnsupportedDefinitionException
 };
 use FireHub\Runtime;
-use ReflectionClass, ReflectionException;
 
 /**
  * ### Resolves registered dependency injection services
@@ -58,6 +58,12 @@ final readonly class Resolver implements ResolverBoundary {
     private CandidateSelector $selector;
 
     /**
+     * ### Constructor metadata cache
+     * @since 1.0.0
+     */
+    private ConstructorMetadataCache $metadata;
+
+    /**
      * ### Constructor
      * @since 1.0.0
      *
@@ -78,7 +84,11 @@ final readonly class Resolver implements ResolverBoundary {
         private InstanceStore $singletons
     ) {
 
-        $this->matcher = new TypeMatcher;
+        $this->metadata = new ConstructorMetadataCache;
+
+        $this->matcher = new TypeMatcher(
+            $this->metadata
+        );
 
         $this->selector = new CandidateSelector(
             $this->matcher,
@@ -353,6 +363,7 @@ final readonly class Resolver implements ResolverBoundary {
      * @uses \FireHub\Container\Internal\ResolutionStack::enter() To mark the service as being currently being resolved.
      * @uses \FireHub\Container\Internal\ResolutionStack::leave() To remove the service from the resolution stack.
      * @uses \FireHub\Container\Resolver::autowire() To construct an instance using autowiring.
+     * @uses \FireHub\Container\Internal\ConstructorMetadataCache::get() To retrieve constructor metadata.
      * @uses \FireHub\Runtime\ObjectModel\Inspection::isClass() To check if the identifier is a class.
      *
      * @template TService of object
@@ -377,19 +388,7 @@ final readonly class Resolver implements ResolverBoundary {
         if (!Runtime\ObjectModel\Inspection::isClass($id))
             throw new ServiceNotFoundException;
 
-        try {
-
-            $reflection = new ReflectionClass($id);
-
-        } catch (ReflectionException $exception) { // @phpstan-ignore catch.neverThrown
-
-            throw new ServiceNotFoundException(
-                previous: $exception
-            );
-
-        }
-
-        if (!$reflection->isInstantiable())
+        if (!$this->metadata->get($id)->instantiable)
             throw new ServiceNotFoundException;
 
         $context->stack->enter($id);
@@ -537,7 +536,8 @@ final readonly class Resolver implements ResolverBoundary {
             fn (string $id):object => $this->resolve($id, $context),
             fn (string $id):bool => $this->has($id),
             $this->matcher,
-            $this->selector
+            $this->selector,
+            $this->metadata
         );
 
         return $autowirer->construct($class);

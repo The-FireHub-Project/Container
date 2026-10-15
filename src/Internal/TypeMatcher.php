@@ -14,7 +14,7 @@
 namespace FireHub\Container\Internal;
 
 use FireHub\Runtime;
-use ReflectionClass, ReflectionNamedType, ReflectionParameter;
+use ReflectionNamedType, ReflectionParameter;
 
 /**
  * ### Provides dependency type inspection and matching
@@ -28,6 +28,20 @@ use ReflectionClass, ReflectionNamedType, ReflectionParameter;
  * @internal
  */
 final readonly class TypeMatcher {
+
+    /**
+     * ### Constructor
+     * @since 1.0.0
+     *
+     * @param \FireHub\Container\Internal\ConstructorMetadataCache $metadata <p>
+     * Shared constructor metadata cache.
+     * </p>
+     *
+     * @return void
+     */
+    public function __construct (
+        private ConstructorMetadataCache $metadata
+    ) {}
 
     /**
      * ### Resolves a parameter class identifier
@@ -72,6 +86,7 @@ final readonly class TypeMatcher {
      * Constructor dependencies are not resolved during this check.
      * @since 1.0.0
      *
+     * @uses \FireHub\Container\Internal\ConstructorMetadataCache::get() To retrieve constructor metadata.
      * @uses \FireHub\Runtime\ObjectModel\Inspection::isClass() To check if the identifier is a class.
      *
      * @param class-string $class <p>
@@ -85,7 +100,7 @@ final readonly class TypeMatcher {
         if (!Runtime\ObjectModel\Inspection::isClass($class))
             return false;
 
-        return new ReflectionClass($class)->isInstantiable();
+        return $this->metadata->get($class)->instantiable;
 
     }
 
