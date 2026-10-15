@@ -43,7 +43,7 @@ final readonly class Autowirer {
      * @param Closure(class-string):bool $has <p>
      * Service registration checker.
      * </p>
-     * @param Closure():(iterable<class-string>) $candidates <p>
+     * @param Closure():(iterable<class-string, class-string>) $candidates <p>
      * Service candidates provider.
      * </p>
      */
@@ -270,7 +270,7 @@ final readonly class Autowirer {
      *
      * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates satisfy the intersection.
      *
-     * @return null|string Selected service identifier, or null if none matches.
+     * @return null|class-string Selected service identifier, or null if none matches.
      */
     private function intersectionId (ReflectionParameter $parameter, ReflectionIntersectionType $type):?string {
 
@@ -281,6 +281,9 @@ final readonly class Autowirer {
             $matchesAll = true;
 
             foreach ($type->getTypes() as $member) {
+
+                if (!$member instanceof ReflectionNamedType)
+                    continue;
 
                 $contract = $this->classId($parameter, $member);
 

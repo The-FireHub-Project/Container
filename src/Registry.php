@@ -132,7 +132,7 @@ final class Registry {
      * Factory definitions without declared implementation types are excluded.
      * @since 1.0.0
      *
-     * @return array<string, class-string> Registered implementation types.
+     * @return array<class-string, class-string> Registered implementation types.
      */
     public function implementations ():array {
 
