@@ -18,7 +18,7 @@ use FireHub\Container\Exception\ {
 };
 use FireHub\Runtime;
 use Closure, ReflectionIntersectionType, ReflectionNamedType,
-    ReflectionParameter, ReflectionUnionType;
+    ReflectionParameter, ReflectionType, ReflectionUnionType;
 
 /**
  * ### Selects dependency injection candidates
@@ -57,13 +57,15 @@ final readonly class CandidateSelector {
     ) {}
 
     /**
-     * ### Selects a union dependency
+     * ### Selects a union or DNF dependency
      *
-     * Selects exactly one eligible service from a union type.
+     * Selects a unique eligible service from the declared union alternatives.
      *
-     * Explicitly registered candidates take precedence over implicitly constructible candidates.
+     * Registered candidates take precedence over implicitly constructible alternatives.
      * @since 1.0.0
      *
+     * @uses \FireHub\Container\Internal\CandidateSelector::matchesType() To check if a service implementation
+     * satisfies a dependency type.
      * @uses \FireHub\Container\Internal\CandidateSelector::ambiguous() To report multiple candidates.
      * @uses \FireHub\Container\Internal\TypeMatcher::classId() Resolves a parameter class identifier.
      * @uses \FireHub\Container\Internal\TypeMatcher::isConstructible() Checks if a class is implicitly constructible.
@@ -92,16 +94,17 @@ final readonly class CandidateSelector {
         /** @var array<class-string, true> $implicit */
         $implicit = [];
 
+        foreach (($this->candidates)() as $id => $implementation) {
+
+            if ($this->matchesType($implementation, $parameter, $type))
+                $registered[$id] = true;
+
+        }
+
         foreach ($type->getTypes() as $member) {
 
             if (!$member instanceof ReflectionNamedType)
-                throw new ServiceInstantiationException(
-                    context: [
-                        'class' => $parameter->getDeclaringClass()?->getName(),
-                        'parameter' => $parameter->getName(),
-                        'type' => (string)$type
-                    ]
-                );
+                continue;
 
             $id = $this->matcher->classId($parameter, $member);
 
@@ -121,10 +124,16 @@ final readonly class CandidateSelector {
 
         }
 
-        $selected = $registered !== [] ? $registered : $implicit;
+        $selected = $registered !== []
+            ? $registered
+            : $implicit;
 
         if (Runtime\Arr\Inspection::count($selected) > 1)
-            $this->ambiguous($parameter, $type, Runtime\Arr\Access::keys($selected));
+            $this->ambiguous(
+                $parameter,
+                $type,
+                Runtime\Arr\Access::keys($selected)
+            );
 
         return Runtime\Arr\Access::firstKey($selected);
 
@@ -139,9 +148,8 @@ final readonly class CandidateSelector {
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Internal\CandidateSelector::ambiguous() To report multiple candidates.
-     * @uses \FireHub\Container\Internal\TypeMatcher::classId() Resolves a parameter class identifier.
-     * @uses \FireHub\Container\Internal\TypeMatcher::matches() To check if a service implementation satisfies a
-     * contract.
+     * @uses \FireHub\Container\Internal\CandidateSelector::matchesType() To check if a service implementation
+     * satisfies a dependency type.
      * @uses \FireHub\Runtime\Arr\Inspection::count() To check if the union contains multiple candidates.
      * @uses \FireHub\Runtime\Arr\Access::keys() To get the union member identifiers.
      * @uses \FireHub\Runtime\Arr\Access::firstKey() To get the first union member identifier.
@@ -164,42 +172,84 @@ final readonly class CandidateSelector {
 
         foreach (($this->candidates)() as $id => $implementation) {
 
-            $matchesAll = true;
-
-            foreach ($type->getTypes() as $member) {
-
-                if (!$member instanceof ReflectionNamedType) {
-
-                    $matchesAll = false;
-
-                    break;
-
-                }
-
-                $contract = $this->matcher->classId($parameter, $member);
-
-                if (
-                    $contract === null
-                    || !$this->matcher->matches($implementation, $contract)
-                ) {
-
-                    $matchesAll = false;
-
-                    break;
-
-                }
-
-            }
-
-            if ($matchesAll)
+            if ($this->matchesType($implementation, $parameter, $type))
                 $matches[$id] = true;
 
         }
 
         if (Runtime\Arr\Inspection::count($matches) > 1)
-            $this->ambiguous($parameter, $type, Runtime\Arr\Access::keys($matches));
+            $this->ambiguous(
+                $parameter,
+                $type,
+                Runtime\Arr\Access::keys($matches)
+            );
 
         return Runtime\Arr\Access::firstKey($matches);
+
+    }
+
+    /**
+     * ### Checks whether an implementation satisfies a dependency type
+     *
+     * Evaluates named, intersection, and union dependency types recursively.
+     *
+     * Intersection types require all members to match, while union types require at least one matching member.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\TypeMatcher::classId() Resolves a parameter class identifier.
+     * @uses \FireHub\Container\Internal\TypeMatcher::matches() To check if a service implementation satisfies a
+     * contract.
+     *
+     * @param class-string $implementation <p>
+     * Concrete implementation class.
+     * </p>
+     * @param ReflectionParameter $parameter <p>
+     * Constructor parameter.
+     * </p>
+     * @param ReflectionType $type <p>
+     * Dependency type.
+     * </p>
+     *
+     * @return bool True if the implementation satisfies the dependency type.
+     */
+    public function matchesType (string $implementation, ReflectionParameter $parameter, ReflectionType $type):bool {
+
+        if ($type instanceof ReflectionNamedType) {
+
+            $contract = $this->matcher->classId($parameter, $type);
+
+            return $contract !== null
+                && $this->matcher->matches($implementation, $contract);
+
+        }
+
+        if ($type instanceof ReflectionIntersectionType) {
+
+            foreach ($type->getTypes() as $member) {
+
+                if (!$this->matchesType($implementation, $parameter, $member))
+                    return false;
+
+            }
+
+            return true;
+
+        }
+
+        if ($type instanceof ReflectionUnionType) {
+
+            foreach ($type->getTypes() as $member) {
+
+                if ($this->matchesType($implementation, $parameter, $member))
+                    return true;
+
+            }
+
+            return false;
+
+        }
+
+        return false;
 
     }
 

@@ -113,6 +113,7 @@ final readonly class Autowirer {
      * @uses \FireHub\Container\Internal\CandidateSelector::union() To select a union dependency.
      * @uses \FireHub\Container\Internal\CandidateSelector::intersection() To select an intersection dependency.
      * @uses \FireHub\Container\Internal\TypeMatcher::isConstructible() To check implicit constructibility.
+     * @uses \FireHub\Container\Internal\CandidateSelector::matchesType() To check if a service implementation
      *
      * @param \FireHub\Container\Internal\ParameterPlan $plan <p>
      * Compiled constructor parameter plan.
@@ -146,8 +147,30 @@ final readonly class Autowirer {
         if ($id !== null && (
                 ($this->has)($id)
                 || $this->matcher->isConstructible($id)
-            ))
-            return ($this->resolve)($id, $context);
+            )) {
+
+            $instance = ($this->resolve)($id, $context);
+
+            if (
+                $plan->composite !== null
+                && !$this->selector->matchesType(
+                    $instance::class,
+                    $plan->parameter,
+                    $plan->composite
+                )
+            )
+                throw new ServiceInstantiationException(
+                    context: [
+                        'class' => $plan->parameter->getDeclaringClass()?->getName(),
+                        'parameter' => $plan->parameter->getName(),
+                        'type' => (string)$plan->composite,
+                        'instance' => $instance::class
+                    ]
+                );
+
+            return $instance;
+
+        }
 
         if ($plan->hasDefault)
             return $plan->default;
