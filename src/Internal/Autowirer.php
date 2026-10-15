@@ -13,9 +13,12 @@
 
 namespace FireHub\Container\Internal;
 
-use FireHub\Container\Exception\ServiceInstantiationException;
+use FireHub\Container\Exception\ {
+    AmbiguousDependencyException, ServiceInstantiationException
+};
 use FireHub\Runtime;
-use Closure, ReflectionClass, ReflectionException, ReflectionNamedType, ReflectionParameter;
+use Closure, ReflectionClass, ReflectionException, ReflectionNamedType, ReflectionParameter,
+    ReflectionIntersectionType, ReflectionUnionType;
 
 /**
  * ### Automatically constructs registered services
@@ -40,18 +43,24 @@ final readonly class Autowirer {
      * @param Closure(class-string):bool $has <p>
      * Service registration checker.
      * </p>
+     * @param Closure():(iterable<class-string>) $candidates <p>
+     * Service candidates provider.
+     * </p>
      */
     public function __construct (
         private Closure $resolve,
-        private Closure $has
+        private Closure $has,
+        private Closure $candidates
     ) {}
 
     /**
      * ### Constructs a service with resolved dependencies
      *
-     * Inspects the constructor and resolves registered object dependencies.
+     * Inspects the constructor and resolves registered or implicitly constructible object dependencies.
      *
-     * Optional parameters with unresolved dependencies use their default values when available.
+     * Parameters with default values use their defaults when no eligible dependency is available.
+     * Nullable parameters without default values remain required.
+     * Variadic parameters are left empty unless explicitly supplied through a future binding mechanism.
      * @since 1.0.0
      *
      * @param class-string $class <p>
@@ -61,7 +70,7 @@ final readonly class Autowirer {
      * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter is not optional and cannot
      * be resolved.
      * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service is not registered.
-     * @throws ReflectionException If the class cannot be reflected.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
      *
      * @return object Constructed service instance.
      */
@@ -91,8 +100,14 @@ final readonly class Autowirer {
 
         $arguments = [];
 
-        foreach ($constructor->getParameters() as $parameter)
+        foreach ($constructor->getParameters() as $parameter) {
+
+            if ($parameter->isVariadic())
+                continue;
+
             $arguments[] = $this->resolveParameter($parameter);
+
+        }
 
         return $reflection->newInstanceArgs($arguments);
 
@@ -160,12 +175,156 @@ final readonly class Autowirer {
     }
 
     /**
+     * ### Resolves a union dependency identifier
+     *
+     * Selects a unique dependency from a union of class or interface types.
+     *
+     * Explicitly registered services take precedence over implicitly constructible concrete classes.
+     *
+     * Multiple candidates at the same priority level are considered ambiguous.
+     *
+     * This method does not instantiate any dependencies.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Runtime\Arr\Inspection::count() To check if the union contains multiple candidates.
+     * @uses \FireHub\Runtime\Arr\Access::keys() To get the union member identifiers.
+     * @uses \FireHub\Runtime\Arr\Access::firstKey() To get the first union member identifier.
+     *
+     * @param ReflectionParameter $parameter <p>
+     * Constructor parameter.
+     * </p>
+     * @param ReflectionUnionType $type <p>
+     * Declared union type.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     *
+     * @return null|class-string Selected service identifier, or null if no candidate is available.
+     */
+    private function unionId (ReflectionParameter $parameter, ReflectionUnionType $type):?string {
+
+        $registered = [];
+        $implicit = [];
+
+        foreach ($type->getTypes() as $member) {
+
+            if (!$member instanceof ReflectionNamedType)
+                continue;
+
+            $id = $this->classId($parameter, $member);
+
+            if ($id === null)
+                continue;
+
+            if (($this->has)($id)) {
+
+                $registered[$id] = true;
+
+                continue;
+
+            }
+
+            if ($this->canResolve($id))
+                $implicit[$id] = true;
+
+        }
+
+        $candidates = $registered !== [] ? $registered : $implicit;
+
+        if (Runtime\Arr\Inspection::count($candidates) > 1)
+            throw new AmbiguousDependencyException(
+                context: [
+                    'class' => $parameter->getDeclaringClass()?->getName(),
+                    'parameter' => $parameter->getName(),
+                    'type' => (string)$type,
+                    'candidates' => Runtime\Arr\Access::keys($candidates)
+                ]
+            );
+
+        return Runtime\Arr\Access::firstKey($candidates);
+
+    }
+
+    /**
+     * ### Resolves an intersection dependency identifier
+     *
+     * Selects a registered service whose implementation satisfies every declared type in the intersection.
+     *
+     * Resolution succeeds only when exactly one eligible candidate exists.
+     *
+     * This method does not instantiate any dependencies.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\Autowirer::classId() Resolves a parameter class identifier.
+     * @uses \FireHub\Runtime\Arr\Inspection::count() To check if the intersection contains multiple candidates.
+     * @uses \FireHub\Runtime\Arr\Access::keys() To get the intersection member identifiers.
+     * @uses \FireHub\Runtime\Arr\Access::firstKey() To get the first intersection member identifier.
+     * @uses \FireHub\Runtime\ObjectModel\Relation::instanceOf() To check if a service implements a contract.
+     *
+     * @param ReflectionParameter $parameter <p>
+     * Constructor parameter.
+     * </p>
+     * @param ReflectionIntersectionType $type <p>
+     * Declared intersection type.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates satisfy the intersection.
+     *
+     * @return null|string Selected service identifier, or null if none matches.
+     */
+    private function intersectionId (ReflectionParameter $parameter, ReflectionIntersectionType $type):?string {
+
+        $matches = [];
+
+        foreach (($this->candidates)() as $id => $implementation) {
+
+            $matchesAll = true;
+
+            foreach ($type->getTypes() as $member) {
+
+                $contract = $this->classId($parameter, $member);
+
+                if ($contract === null
+                    || !Runtime\ObjectModel\Relation::instanceOf(
+                        $implementation,
+                        $contract
+                    )) {
+
+                    $matchesAll = false;
+
+                    break;
+
+                }
+
+            }
+
+            if ($matchesAll)
+                $matches[$id] = true;
+
+        }
+
+        if (Runtime\Arr\Inspection::count($matches) > 1)
+            throw new AmbiguousDependencyException(
+                context: [
+                    'class' => $parameter->getDeclaringClass()?->getName(),
+                    'parameter' => $parameter->getName(),
+                    'type' => (string)$type,
+                    'candidates' => Runtime\Arr\Access::keys($matches)
+                ]
+            );
+
+        return Runtime\Arr\Access::firstKey($matches);
+
+    }
+
+    /**
      * ### Resolves a constructor parameter
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Internal\Autowirer::canResolve() Checks if a dependency can be resolved.
      * @uses \FireHub\Container\Internal\Autowirer::resolve() Resolves a dependency.
      * @uses \FireHub\Container\Internal\Autowirer::classId() Resolves a parameter class identifier.
+     * @uses \FireHub\Container\Internal\Autowirer::unionId() Resolves a union dependency identifier.
      *
      * @param ReflectionParameter $parameter <p>
      * Constructor parameter.
@@ -173,29 +332,26 @@ final readonly class Autowirer {
      *
      * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter is not optional and cannot
      * be resolved.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
      *
      * @return mixed Resolved argument.
      */
     private function resolveParameter (ReflectionParameter $parameter):mixed {
 
-        if ($parameter->isVariadic())
-            throw new ServiceInstantiationException(
-                context: [
-                    'class' => $parameter->getDeclaringClass()?->getName(),
-                    'parameter' => $parameter->getName()
-                ]
-            );
-
         $type = $parameter->getType();
 
-        if ($type instanceof ReflectionNamedType && !$type->isBuiltin()) {
+        $id = match (true) {
+            $type instanceof ReflectionNamedType
+                => $this->classId($parameter, $type),
+            $type instanceof ReflectionUnionType
+                => $this->unionId($parameter, $type),
+            $type instanceof ReflectionIntersectionType
+                => $this->intersectionId($parameter, $type),
+            default => null
+        };
 
-            $id = $this->classId($parameter, $type);
-
-            if ($id !== null && $this->canResolve($id))
-                return ($this->resolve)($id);
-
-        }
+        if ($id !== null && $this->canResolve($id))
+            return ($this->resolve)($id);
 
         if ($parameter->isDefaultValueAvailable())
             return $parameter->getDefaultValue();
@@ -203,7 +359,12 @@ final readonly class Autowirer {
         throw new ServiceInstantiationException(
             context: [
                 'class' => $parameter->getDeclaringClass()?->getName(),
-                'parameter' => $parameter->getName()
+                'parameter' => $parameter->getName(),
+                'position' => $parameter->getPosition(),
+                'type' => $type?->__toString(),
+                'nullable' => $type?->allowsNull(),
+                'optional' => $parameter->isOptional(),
+                'has_default' => $parameter->isDefaultValueAvailable()
             ]
         );
 

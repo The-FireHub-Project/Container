@@ -13,6 +13,9 @@
 
 namespace FireHub\Container;
 
+use FireHub\Container\Definition\ {
+    Cls, Instance
+};
 use FireHub\Container\Exception\ {
     DuplicateServiceException, ServiceNotFoundException
 };
@@ -118,6 +121,34 @@ final class Registry {
     public function all ():array {
 
         return $this->definitions;
+
+    }
+
+    /**
+     * ### Gets registered service implementation types
+     *
+     * Returns service identifiers mapped to their statically known implementation classes.
+     *
+     * Factory definitions without declared implementation types are excluded.
+     * @since 1.0.0
+     *
+     * @return array<string, class-string> Registered implementation types.
+     */
+    public function implementations ():array {
+
+        $implementations = [];
+
+        foreach ($this->definitions as $id => $definition) {
+
+            if ($definition instanceof Cls)
+                $implementations[$id] = $definition->class;
+
+            elseif ($definition instanceof Instance)
+                $implementations[$id] = $definition->instance::class;
+
+        }
+
+        return $implementations;
 
     }
 

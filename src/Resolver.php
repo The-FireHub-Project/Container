@@ -338,6 +338,7 @@ final readonly class Resolver implements ResolverBoundary {
      * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
      * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the constructed instance does not match
      * the identifier.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
      *
      * @return TService Constructed service.
      */
@@ -451,7 +452,7 @@ final readonly class Resolver implements ResolverBoundary {
      * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter is not optional and cannot
      * be resolved.
      * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service is not registered.
-     * @throws ReflectionException If the class cannot be reflected.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
      *
      * @return object Created service instance.
      */
@@ -485,6 +486,7 @@ final readonly class Resolver implements ResolverBoundary {
      * @uses \FireHub\Container\Resolver::resolve() To resolve a service.
      * @uses \FireHub\Container\Resolver::has() To check for service existence.
      * @uses \FireHub\Container\Internal\Autowirer::construct() To construct an instance using autowiring.
+     * @uses \FireHub\Container\Registry::implementations() To get all registered concrete implementations.
      *
      * @param class-string $class <p>
      * Concrete implementation class.
@@ -496,7 +498,7 @@ final readonly class Resolver implements ResolverBoundary {
      * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter is not optional and cannot
      * be resolved.
      * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service is not registered.
-     * @throws ReflectionException If the class cannot be reflected.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
      *
      * @return object Constructed service instance.
      */
@@ -504,7 +506,8 @@ final readonly class Resolver implements ResolverBoundary {
 
         $autowirer = new Autowirer(
             fn (string $id):object => $this->resolve($id, $context),
-            fn (string $id):bool => $this->has($id)
+            fn (string $id):bool => $this->has($id),
+            fn ():iterable => $this->registry->implementations()
         );
 
         return $autowirer->construct($class);
