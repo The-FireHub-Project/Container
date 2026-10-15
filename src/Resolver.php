@@ -19,12 +19,12 @@ use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance, Service
 };
 use FireHub\Container\Internal\ {
-    ContextualResolver, InstanceStore, ResolutionContext, ScopeState
+    Autowirer, ContextualResolver, InstanceStore, ResolutionContext, ScopeState
 };
 use FireHub\Container\Exception\ {
-    ScopeRequiredException, ServiceInstantiationException, ServiceTypeMismatchException, UnsupportedDefinitionException
+    ScopeRequiredException, ServiceTypeMismatchException, UnsupportedDefinitionException
 };
-use ReflectionClass;
+use ReflectionException;
 
 /**
  * ### Resolves registered dependency injection services
@@ -358,6 +358,7 @@ final readonly class Resolver implements ResolverBoundary {
      * Constructs an object using the supplied service definition.
      * @since 1.0.0
      *
+     * @uses \FireHub\Container\Resolver::autowire() To construct an instance using autowiring.
      * @uses \FireHub\Container\Resolver::contextual() To create a contextual resolver.
      *
      * @param Service $definition <p>
@@ -365,7 +366,10 @@ final readonly class Resolver implements ResolverBoundary {
      * </p>
      *
      * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
-     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the class is not instantiable.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter is not optional and cannot
+     * be resolved.
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service is not registered.
+     * @throws ReflectionException If the class cannot be reflected.
      *
      * @return object Created service instance.
      */
@@ -379,7 +383,10 @@ final readonly class Resolver implements ResolverBoundary {
                 $this->contextual($context)
             ),
 
-            $definition instanceof Cls => $this->construct($definition->class),
+            $definition instanceof Cls => $this->autowire(
+                $definition->class,
+                $context
+            ),
 
             default => throw new UnsupportedDefinitionException
 
@@ -388,47 +395,37 @@ final readonly class Resolver implements ResolverBoundary {
     }
 
     /**
-     * ### Constructs a class-based service
+     * ### Constructs a service using constructor autowiring
      *
-     * Creates an instance of the specified concrete class.
-     *
-     * Constructor dependency injection is not yet supported.
+     * Automatically resolves registered constructor dependencies while preserving the current resolution context.
      * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Resolver::resolve() To resolve a service.
+     * @uses \FireHub\Container\Resolver::has() To check for service existence.
+     * @uses \FireHub\Container\Internal\Autowirer::construct() To construct an instance using autowiring.
      *
      * @param class-string $class <p>
      * Concrete implementation class.
      * </p>
+     * @param \FireHub\Container\Internal\ResolutionContext $context <p>
+     * Active resolution context.
+     * </p>
      *
-     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the class is not instantiable.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter is not optional and cannot
+     * be resolved.
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service is not registered.
+     * @throws ReflectionException If the class cannot be reflected.
      *
-     * @return object Created service instance.
+     * @return object Constructed service instance.
      */
-    private function construct (string $class):object {
+    private function autowire (string $class, ResolutionContext $context):object {
 
-        try {
+        $autowirer = new Autowirer(
+            fn (string $id):object => $this->resolve($id, $context),
+            fn (string $id):bool => $this->has($id)
+        );
 
-            $reflection = new ReflectionClass($class);
-
-            if (!$reflection->isInstantiable())
-                throw new ServiceInstantiationException(
-                    context: [
-                        'class' => $class
-                    ]
-                );
-
-            return $reflection->newInstance();
-
-        } catch (ServiceInstantiationException $exception) {
-
-            throw $exception;
-
-        } catch (\Throwable $exception) {
-
-            throw new ServiceInstantiationException(
-                previous: $exception
-            );
-
-        }
+        return $autowirer->construct($class);
 
     }
 
