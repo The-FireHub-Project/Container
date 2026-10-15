@@ -16,11 +16,14 @@ namespace FireHub\Container\Exception;
 use FireHub\Core\Exception\RuntimeException;
 
 /**
- * ### Thrown when a scoped service is registered after the scope has been closed
+ * ### Thrown when accessing a closed dependency injection scope
+ *
+ * Indicates that an operation was attempted on a scope that has already been closed and is no longer available for
+ * service resolution.
  * @since 1.0.0
  */
 final class ScopeClosedException extends RuntimeException {
 
-    protected const string DEFAULT_MESSAGE = 'Cannot register services in a closed scope';
+    protected const string DEFAULT_MESSAGE = 'Cannot access a closed dependency injection scope.';
 
 }

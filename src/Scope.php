@@ -14,8 +14,10 @@
 namespace FireHub\Container;
 
 use FireHub\Core\Boundary\Resolver as ResolverBoundary;
-use FireHub\Container\Internal\InstanceStore;
-use FireHub\Container\Exception\ScopeClosedException;
+use FireHub\Container\Internal\ {
+    InstanceStore, ScopeState
+};
+use Closure;
 
 /**
  * ### Dependency injection resolution scope
@@ -33,22 +35,20 @@ use FireHub\Container\Exception\ScopeClosedException;
  *
  * Scopes do not support nested scope creation.
  * @since 1.0.0
- *
- * @internal
  */
-final class Scope implements ResolverBoundary {
+final readonly class Scope implements ResolverBoundary {
 
     /**
      * ### Scoped instance store
      * @since 1.0.0
      */
-    private readonly InstanceStore $instances;
+    private InstanceStore $instances;
 
     /**
-     * ### Scope closure state
+     * ### Scope lifecycle state
      * @since 1.0.0
      */
-    private bool $closed = false;
+    private ScopeState $state;
 
     /**
      * ### Constructor
@@ -61,10 +61,12 @@ final class Scope implements ResolverBoundary {
      * @return void
      */
     public function __construct (
-        private readonly Resolver $resolver
+        private Resolver $resolver
     ) {
 
         $this->instances = new InstanceStore;
+
+        $this->state = new ScopeState;
 
     }
 
@@ -79,7 +81,6 @@ final class Scope implements ResolverBoundary {
      * Resolution is prohibited after the scope has been closed.
      * @since 1.0.0
      *
-     * @uses \FireHub\Container\Scope::assertOpen() To check if the scope is open.
      * @uses \FireHub\Container\Resolver::getScoped() To resolve a scoped service.
      *
      * @template TService of object
@@ -90,17 +91,21 @@ final class Scope implements ResolverBoundary {
      *
      * @throws \FireHub\Container\Exception\ScopeClosedException If the scope has been closed.
      * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service identifier is not registered.
-     * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the service identifier is not registered.
+     * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the resolved service is not compatible
+     * with its registered identifier.
      * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
      * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
+     * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
      *
      * @return TService Resolved service.
      */
     public function get (string $id):object {
 
-        $this->assertOpen();
-
-        return $this->resolver->getScoped($id, $this->instances);
+        return $this->resolver->getScoped(
+            $id,
+            $this->instances,
+            $this->state
+        );
 
     }
 
@@ -114,7 +119,7 @@ final class Scope implements ResolverBoundary {
      * Registration checks are prohibited after the scope has been closed.
      * @since 1.0.0
      *
-     * @uses \FireHub\Container\Scope::assertOpen() To check if the scope is open.
+     * @uses \FireHub\Container\Internal\ScopeState::assertOpen() To check if the scope is open.
      * @uses \FireHub\Container\Resolver::has() To check if a service is registered.
      *
      * @param class-string $id <p>
@@ -127,9 +132,52 @@ final class Scope implements ResolverBoundary {
      */
     public function has (string $id):bool {
 
-        $this->assertOpen();
+        $this->state->assertOpen();
 
         return $this->resolver->has($id);
+
+    }
+
+    /**
+     * ### Executes a callback within the scope
+     *
+     * Executes the provided callback using this scope as its dependency resolver.
+     *
+     * The scope is automatically closed after callback execution, including when the callback throws an exception.
+     *
+     * Nested execution of the same scope is not permitted.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\ScopeState::beginRun() To begin scope execution.
+     * @uses \FireHub\Container\Internal\ScopeState::endRun() To end scope execution.
+     * @uses \FireHub\Container\Scope::close() To close the scope.
+     *
+     * @template TResult
+     *
+     * @param Closure(\FireHub\Core\Boundary\Resolver):TResult $callback <p>
+     * Callback to execute within the scope.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
+     * @throws \FireHub\Container\Exception\ScopeActiveException If the scope is already executing.
+     *
+     * @return TResult Callback result.
+     */
+    public function run (Closure $callback):mixed {
+
+        $this->state->beginRun();
+
+        try {
+
+            return $callback($this);
+
+        } finally {
+
+            $this->state->endRun();
+
+            $this->close();
+
+        }
 
     }
 
@@ -144,48 +192,18 @@ final class Scope implements ResolverBoundary {
      * other scopes.
      * @since 1.0.0
      *
+     * @uses \FireHub\Container\Internal\ScopeState::close() To close the scope.
      * @uses \FireHub\Container\Internal\InstanceStore::clear() To clear the instance store.
+     *
+     * @throws \FireHub\Container\Exception\ScopeActiveException If service resolution is active.
      *
      * @return void
      */
     public function close ():void {
 
-        if ($this->closed)
-            return;
-
-        $this->closed = true;
+        $this->state->close();
 
         $this->instances->clear();
-
-    }
-
-    /**
-     * ### Checks whether the scope is closed
-     * @since 1.0.0
-     *
-     * @return bool True if the scope is closed, false otherwise.
-     */
-    public function isClosed ():bool {
-
-        return $this->closed;
-
-    }
-
-    /**
-     * ### Ensures the scope is open
-     *
-     * Prevents service resolution and registration checks after the
-     * scope has been closed.
-     * @since 1.0.0
-     *
-     * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
-     *
-     * @return void
-     */
-    private function assertOpen ():void {
-
-        if ($this->closed)
-            throw new ScopeClosedException;
 
     }
 

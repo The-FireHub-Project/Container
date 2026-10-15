@@ -19,7 +19,7 @@ use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance, Service
 };
 use FireHub\Container\Internal\ {
-    ContextualResolver, InstanceStore, ResolutionContext
+    ContextualResolver, InstanceStore, ResolutionContext, ScopeState
 };
 use FireHub\Container\Exception\ {
     ScopeRequiredException, ServiceInstantiationException, ServiceTypeMismatchException, UnsupportedDefinitionException
@@ -99,6 +99,8 @@ final readonly class Resolver implements ResolverBoundary {
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Resolver::resolve() To resolve a service.
+     * @uses \FireHub\Container\Internal\ScopeState::enter() To mark the scope as being currently being resolved.
+     * @uses \FireHub\Container\Internal\ScopeState::leave() To remove the scope from the resolution stack.
      *
      * @template TService of object
      *
@@ -108,20 +110,37 @@ final readonly class Resolver implements ResolverBoundary {
      * @param \FireHub\Container\Internal\InstanceStore $scoped <p>
      * Scoped instance storage.
      * </p>
+     * @param \FireHub\Container\Internal\ScopeState $scope <p>
+     * Scope lifecycle state.
+     * </p>
      *
      * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service identifier is not registered.
      * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the service identifier is not registered.
      * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
      * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
+     * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
      *
      * @return TService Resolved service.
      */
-    public function getScoped (string $id, InstanceStore $scoped):object {
+    public function getScoped (string $id, InstanceStore $scoped, ScopeState $scope):object {
 
-        return $this->resolve(
-            $id,
-            new ResolutionContext(scoped: $scoped)
-        );
+        $scope->enter();
+
+        try {
+
+            return $this->resolve(
+                $id,
+                new ResolutionContext(
+                    scoped: $scoped,
+                    scope: $scope
+                )
+            );
+
+        } finally {
+
+            $scope->leave();
+
+        }
 
     }
 
@@ -292,6 +311,9 @@ final readonly class Resolver implements ResolverBoundary {
      *
      * @uses \FireHub\Container\Resolver::resolve() To resolve a service.
      * @uses \FireHub\Container\Resolver::has() To check for service existence.
+     * @uses \FireHub\Container\Internal\ScopeState::assertOpen() To check if the current scope is open.
+     * @uses \FireHub\Container\Internal\ScopeState::enter() To mark the current scope as being currently being resolved.
+     * @uses \FireHub\Container\Internal\ScopeState::leave() To remove the current scope from the resolution stack.
      *
      * @param \FireHub\Container\Internal\ResolutionContext $context <p>
      * Active dependency resolution context.
@@ -302,8 +324,28 @@ final readonly class Resolver implements ResolverBoundary {
     private function contextual (ResolutionContext $context):ContextualResolver {
 
         return new ContextualResolver(
-            fn (string $id):object => $this->resolve($id, $context),
-            fn (string $id):bool => $this->has($id)
+            function (string $id) use ($context):object {
+
+                $context->scope?->enter();
+
+                try {
+
+                    return $this->resolve($id, $context);
+
+                } finally {
+
+                    $context->scope?->leave();
+
+                }
+
+            },
+            function (string $id) use ($context):bool {
+
+                $context->scope?->assertOpen();
+
+                return $this->has($id);
+
+            }
         );
 
     }

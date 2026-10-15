@@ -383,7 +383,8 @@ final class Container implements ResolverBoundary {
      * </p>
      *
      * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service identifier is not registered.
-     * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the service identifier is not registered.
+     * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the resolved service is not compatible
+     * with its registered identifier.
      * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
      * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
      *

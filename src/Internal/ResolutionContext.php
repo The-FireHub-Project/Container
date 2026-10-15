@@ -38,10 +38,16 @@ final readonly class ResolutionContext {
      * @param null|\FireHub\Container\Internal\InstanceStore $scoped <p>
      * Active scoped instance storage, or null for root resolution.
      * </p>
+     * @param null|\FireHub\Container\Internal\ScopeState $scope <p>
+     * Associated scope lifecycle state.
+     * </p>
+     *
+     * @return void
      */
     public function __construct (
         public ResolutionStack $stack = new ResolutionStack,
-        public ?InstanceStore $scoped = null
+        public ?InstanceStore $scoped = null,
+        public ?ScopeState $scope = null
     ) {}
 
     /**
@@ -56,7 +62,8 @@ final readonly class ResolutionContext {
     public function root ():self {
 
         return new self(
-            stack: $this->stack
+            stack: $this->stack,
+            scope: $this->scope
         );
 
     }
