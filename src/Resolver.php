@@ -134,6 +134,7 @@ final readonly class Resolver implements ResolverBoundary {
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Resolver::resolve() To resolve a service.
+     * @uses \FireHub\Container\Internal\InstanceStore::get() To retrieve a previously resolved instance.
      *
      * @template TService of object
      *
@@ -154,9 +155,15 @@ final readonly class Resolver implements ResolverBoundary {
      */
     public function get (string $id):object {
 
+        $instance = $this->singletons->get($id);
+
+        if ($instance !== null)
+            /** @var TService $instance */
+            return $instance;
+
         return $this->resolve(
             $id,
-            new ResolutionContext()
+            new ResolutionContext
         );
 
     }
@@ -237,8 +244,7 @@ final readonly class Resolver implements ResolverBoundary {
      * ### Resolves a service within the specified context
      * @since 1.0.0
      *
-     * @uses \FireHub\Container\Registry::has() To check for service existence.
-     * @uses \FireHub\Container\Registry::get() To retrieve the service definition.
+     * @uses \FireHub\Container\Registry::find() To retrieve a service definition.
      * @uses \FireHub\Container\Internal\ResolutionStack::enter() To mark the service as being currently being resolved.
      * @uses \FireHub\Container\Internal\ResolutionStack::leave() To remove the service from the resolution stack.
      * @uses \FireHub\Container\Resolver::resolveService() To resolve a service.
@@ -265,10 +271,10 @@ final readonly class Resolver implements ResolverBoundary {
      */
     private function resolve (string $id, ResolutionContext $context):object {
 
-        if (!$this->registry->has($id))
-            return $this->resolveImplicit($id, $context);
+        $definition = $this->registry->find($id);
 
-        $definition = $this->registry->get($id);
+        if ($definition === null)
+            return $this->resolveImplicit($id, $context);
 
         if ($definition instanceof Alias) {
 
@@ -515,20 +521,15 @@ final readonly class Resolver implements ResolverBoundary {
     private function create (Service $definition, ResolutionContext $context):object {
 
         return match (true) {
-
             $definition instanceof Instance => $definition->instance,
-
             $definition instanceof Factory => ($definition->factory)(
                 $this->contextual($context)
             ),
-
             $definition instanceof Cls => $this->autowire(
                 $definition->class,
                 $context
             ),
-
             default => throw new UnsupportedDefinitionException
-
         };
 
     }

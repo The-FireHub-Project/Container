@@ -111,6 +111,25 @@ final class Registry {
     }
 
     /**
+     * ### Finds a registered service definition
+     *
+     * Returns the service definition associated with the specified identifier without throwing an exception when
+     * the identifier is not registered.
+     * @since 1.0.0
+     *
+     * @param class-string $id <p>
+     * Service identifier.
+     * </p>
+     *
+     * @return null|\FireHub\Container\Definition Registered service definition, or null if absent.
+     */
+    public function find (string $id):?Definition {
+
+        return $this->definitions[$id] ?? null;
+
+    }
+
+    /**
      * ### Gets all registered service definitions
      *
      * Returns all registered service definitions indexed by their service identifiers.
