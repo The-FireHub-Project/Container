@@ -19,7 +19,7 @@ use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance, Service
 };
 use FireHub\Container\Internal\ {
-    Autowirer, ContextualResolver, InstanceStore, ResolutionContext, ScopeState
+    Autowirer, CandidateSelector, ContextualResolver, InstanceStore, ResolutionContext, ScopeState, TypeMatcher
 };
 use FireHub\Container\Exception\ {
     ScopeRequiredException, ServiceNotFoundException, ServiceTypeMismatchException, UnsupportedDefinitionException
@@ -486,7 +486,6 @@ final readonly class Resolver implements ResolverBoundary {
      * @uses \FireHub\Container\Resolver::resolve() To resolve a service.
      * @uses \FireHub\Container\Resolver::has() To check for service existence.
      * @uses \FireHub\Container\Internal\Autowirer::construct() To construct an instance using autowiring.
-     * @uses \FireHub\Container\Registry::implementations() To get all registered concrete implementations.
      *
      * @param class-string $class <p>
      * Concrete implementation class.
@@ -504,10 +503,21 @@ final readonly class Resolver implements ResolverBoundary {
      */
     private function autowire (string $class, ResolutionContext $context):object {
 
+        $matcher = new TypeMatcher;
+
+        $has = fn (string $id):bool => $this->has($id);
+
+        $selector = new CandidateSelector(
+            $matcher,
+            $has,
+            fn ():iterable => $this->registry->implementations()
+        );
+
         $autowirer = new Autowirer(
             fn (string $id):object => $this->resolve($id, $context),
-            fn (string $id):bool => $this->has($id),
-            fn ():iterable => $this->registry->implementations()
+            $has,
+            $matcher,
+            $selector
         );
 
         return $autowirer->construct($class);
