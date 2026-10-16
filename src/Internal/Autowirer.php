@@ -48,6 +48,9 @@ final readonly class Autowirer {
      * @param \FireHub\Container\Internal\DependencyPlanCache $plans <p>
      * Shared dependency plan cache.
      * </p>
+     * @param \FireHub\Container\Internal\ParameterBindingRegistry $bindings <p>
+     * Shared parameter binding registry.
+     * </p>
      *
      * @return void
      */
@@ -56,7 +59,8 @@ final readonly class Autowirer {
         private Closure $has,
         private TypeMatcher $matcher,
         private CandidateSelector $selector,
-        private DependencyPlanCache $plans
+        private DependencyPlanCache $plans,
+        private ParameterBindingRegistry $bindings
     ) {}
 
     /**
@@ -97,7 +101,11 @@ final readonly class Autowirer {
         $arguments = [];
 
         foreach ($plan->parameters as $parameter)
-            $arguments[] = $this->resolveParameter($parameter, $context);
+            $arguments[] = $this->resolveParameter(
+                $class,
+                $parameter,
+                $context
+            );
 
         return $metadata->reflection->newInstanceArgs($arguments);
 
@@ -113,8 +121,14 @@ final readonly class Autowirer {
      * @uses \FireHub\Container\Internal\CandidateSelector::union() To select a union dependency.
      * @uses \FireHub\Container\Internal\CandidateSelector::intersection() To select an intersection dependency.
      * @uses \FireHub\Container\Internal\TypeMatcher::isConstructible() To check implicit constructibility.
-     * @uses \FireHub\Container\Internal\CandidateSelector::matchesType() To check if a service implementation
+     * @uses \FireHub\Container\Internal\CandidateSelector::matchesType() To check if a service implementation.
+     * @uses \FireHub\Container\Internal\ParameterBindingRegistry::has() To check if a parameter is bound.
+     * @uses \FireHub\Container\Internal\ParameterBindingRegistry::get() To get a bound parameter value.
+     * @uses \FireHub\Container\Resolver::resolve() To resolve a service.
      *
+     * @param class-string $class <p>
+     * Concrete service class.
+     * </p>
      * @param \FireHub\Container\Internal\ParameterPlan $plan <p>
      * Compiled constructor parameter plan.
      * </p>
@@ -128,7 +142,14 @@ final readonly class Autowirer {
      *
      * @return mixed Resolved argument.
      */
-    private function resolveParameter (ParameterPlan $plan, ResolutionContext $context):mixed {
+    private function resolveParameter (string $class, ParameterPlan $plan, ResolutionContext $context):mixed {
+
+        $parameter = $plan->parameter;
+
+        $name = $parameter->getName();
+
+        if ($this->bindings->has($class, $name))
+            return $this->bindings->get($class, $name);
 
         $id = $plan->id;
 

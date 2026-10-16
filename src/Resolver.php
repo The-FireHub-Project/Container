@@ -20,7 +20,7 @@ use FireHub\Container\Definition\ {
 };
 use FireHub\Container\Internal\ {
     Autowirer, CandidateSelector, ConstructorMetadataCache, ContextualResolver, DependencyPlanCache, InstanceStore,
-    ResolutionContext, ScopeState, TypeMatcher
+    ParameterBindingRegistry, ResolutionContext, ScopeState, TypeMatcher
 };
 use FireHub\Container\Exception\ {
     ScopeRequiredException, ServiceNotFoundException, ServiceTypeMismatchException, UnsupportedDefinitionException
@@ -46,28 +46,10 @@ use FireHub\Runtime;
 final readonly class Resolver implements ResolverBoundary {
 
     /**
-     * ### Dependency type matcher
-     * @since 1.0.0
-     */
-    private TypeMatcher $matcher;
-
-    /**
-     * ### Dependency candidate selector
-     * @since 1.0.0
-     */
-    private CandidateSelector $selector;
-
-    /**
      * ### Constructor metadata cache
      * @since 1.0.0
      */
     private ConstructorMetadataCache $metadata;
-
-    /**
-     * ### Compiled dependency plan cache
-     * @since 1.0.0
-     */
-    private DependencyPlanCache $plans;
 
     /**
      * ### Reusable dependency autowirer
@@ -89,38 +71,43 @@ final readonly class Resolver implements ResolverBoundary {
      * @param \FireHub\Container\Internal\InstanceStore $singletons <p>
      * Shared singleton instance storage.
      * </p>
+     * @param \FireHub\Container\Internal\ParameterBindingRegistry $parameters <p>
+     * Parameter binding registry.
+     * </p>
      *
      * @return void
      */
     public function __construct (
         private Registry $registry,
-        private InstanceStore $singletons
+        private InstanceStore $singletons,
+        ParameterBindingRegistry $parameters
     ) {
 
         $this->metadata = new ConstructorMetadataCache;
 
-        $this->matcher = new TypeMatcher(
+        $matcher = new TypeMatcher(
             $this->metadata
         );
 
-        $this->selector = new CandidateSelector(
-            $this->matcher,
+        $selector = new CandidateSelector(
+            $matcher,
             fn (string $id):bool => $this->has($id),
             fn ():iterable => $this->registry->implementations()
         );
 
-        $this->plans = new DependencyPlanCache(
+        $plans = new DependencyPlanCache(
             $this->metadata,
-            $this->matcher
+            $matcher
         );
 
         $this->autowirer = new Autowirer(
             fn (string $id, ResolutionContext $context):object =>
             $this->resolve($id, $context),
             fn (string $id):bool => $this->has($id),
-            $this->matcher,
-            $this->selector,
-            $this->plans
+            $matcher,
+            $selector,
+            $plans,
+            $parameters
         );
 
     }

@@ -18,7 +18,9 @@ use FireHub\Core\Meta\Enum\Container\Lifetime;
 use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance
 };
-use FireHub\Container\Internal\InstanceStore;
+use FireHub\Container\Internal\ {
+    InstanceStore, ParameterBindingRegistry
+};
 use FireHub\Container\Exception\ContainerFrozenException;
 use Closure;
 
@@ -53,6 +55,12 @@ final class Container implements ResolverBoundary {
     private readonly Resolver $resolver;
 
     /**
+     * ### Constructor parameter binding registry
+     * @since 1.0.0
+     */
+    private readonly ParameterBindingRegistry $parameters;
+
+    /**
      * ### Container freeze state
      * @var bool
      */
@@ -67,10 +75,12 @@ final class Container implements ResolverBoundary {
     public function __construct () {
 
         $this->registry = new Registry;
+        $this->parameters = new ParameterBindingRegistry;
 
         $this->resolver = new Resolver(
             $this->registry,
-            new InstanceStore
+            new InstanceStore,
+            $this->parameters
         );
 
     }
@@ -363,6 +373,41 @@ final class Container implements ResolverBoundary {
             $id,
             new Alias($target)
         );
+
+    }
+
+    /**
+     * ### Registers explicit constructor parameter bindings
+     *
+     * Associates an implementation class with explicitly configured constructor argument values.
+     *
+     * Explicit bindings take precedence over automatic dependency resolution and constructor default values.
+     *
+     * Bindings are associated with the implementation class rather than a service identifier, allowing them to work
+     * with both registered and implicitly constructed services.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Container::assertMutable() To ensure the container accepts configuration changes.
+     * @uses \FireHub\Container\Internal\ParameterBindingRegistry::register() To register parameter bindings.
+     *
+     * @param class-string $class <p>
+     * Implementation class.
+     * </p>
+     * @param array<non-empty-string, mixed> $parameters <p>
+     * Constructor parameter names mapped to explicit values.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\ContainerFrozenException If the container is frozen.
+     *
+     * @return $this Container instance.
+     */
+    public function bindParameters (string $class, array $parameters):self {
+
+        $this->assertMutable();
+
+        $this->parameters->register($class, $parameters);
+
+        return $this;
 
     }
 
