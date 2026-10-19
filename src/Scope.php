@@ -13,7 +13,7 @@
 
 namespace FireHub\Container;
 
-use FireHub\Core\Boundary\Resolver as ResolverBoundary;
+use FireHub\Core\Boundary\Container\Scope as ScopeBoundary;
 use FireHub\Container\Internal\ {
     InstanceStore, ScopeState
 };
@@ -36,7 +36,7 @@ use Closure;
  * Scopes do not support nested scope creation.
  * @since 1.0.0
  */
-final readonly class Scope implements ResolverBoundary {
+final readonly class Scope implements ScopeBoundary {
 
     /**
      * ### Scoped instance store

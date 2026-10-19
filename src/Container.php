@@ -13,7 +13,9 @@
 
 namespace FireHub\Container;
 
-use FireHub\Core\Boundary\Resolver as ResolverBoundary;
+use FireHub\Core\Boundary\ {
+    Container\Scope as ScopeBoundary, Container as ContainerBoundary
+};
 use FireHub\Core\Meta\Enum\Container\Lifetime;
 use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance
@@ -40,7 +42,7 @@ use Closure;
  * resolution scope.
  * @since 1.0.0
  */
-final class Container implements ResolverBoundary {
+final class Container implements ContainerBoundary {
 
     /**
      * ### Service registry
@@ -86,19 +88,19 @@ final class Container implements ResolverBoundary {
     }
 
     /**
-     * ### Creates a dependency injection scope
+     * {@inheritDoc}
      *
-     * Creates an independent resolution scope associated with this container.
+     * <code>
+     * use FireHub\Container\Container;
      *
-     * Each scope maintains its own cache of scoped service instances while sharing singleton instances and service
-     * definitions with the parent container.
+     * $container = new Container;
      *
-     * Scopes must be explicitly closed when they are no longer needed.
+     * $scope = $container->createScope();
+     * </code>
+     *
      * @since 1.0.0
-     *
-     * @return \FireHub\Container\Scope Created resolution scope.
      */
-    public function createScope ():Scope {
+    public function createScope ():ScopeBoundary {
 
         return new Scope($this->resolver);
 
@@ -110,6 +112,15 @@ final class Container implements ResolverBoundary {
      * Associates a service identifier with its definition.
      *
      * Registration is only permitted while the container is not frozen.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->register(Test::class, new Cls(Test::class));
+     * </code>
+     *
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Container::assertMutable() To check if the container is frozen.
@@ -145,6 +156,15 @@ final class Container implements ResolverBoundary {
      * Associates a service identifier with a concrete implementation class.
      *
      * The service is instantiated lazily according to the specified lifetime.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->bind(Test::class, Test::class);
+     * </code>
+     *
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Container::register() To register a service definition.
@@ -181,6 +201,20 @@ final class Container implements ResolverBoundary {
      * Registers a class-based service instantiated once per container.
      *
      * When no implementation is provided, the identifier itself is used as the implementation class.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->singleton(Test::class);
+     *
+     * $first = $container->get(Test::class);
+     * $second = $container->get(Test::class);
+     *
+     * // $first === $second
+     * </code>
+     *
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Container::bind() To register a class-based service.
@@ -215,6 +249,26 @@ final class Container implements ResolverBoundary {
      * Registers a class-based service instantiated once per resolution scope.
      *
      * Each independent scope receives its own service instance.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->scoped(Test::class);
+     *
+     * $firstScope = $container->createScope();
+     * $secondScope = $container->createScope();
+     *
+     * $first = $firstScope->get(Test::class);
+     * $second = $secondScope->get(Test::class);
+     *
+     * // $first !== $second
+     *
+     * $firstScope->close();
+     * $secondScope->close();
+     * </code>
+     *
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Container::bind() To register a class-based service.
@@ -247,6 +301,19 @@ final class Container implements ResolverBoundary {
      * ### Registers a transient service
      *
      * Registers a class-based service instantiated on each resolution.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->transient(Test::class);
+     *
+     * $first = $container->get(Test::class);
+     * $second = $container->get(Test::class);
+     *
+     * // $first !== $second
+         *
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Container::bind() To register a class-based service.
@@ -280,6 +347,35 @@ final class Container implements ResolverBoundary {
      * Registers a factory responsible for creating the requested service.
      *
      * The factory receives a contextual resolver to resolve dependencies within the current resolution context.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->factory(
+     *     Test::class,
+     *     static fn ($resolver):Test => new Test
+     * );
+     *
+     * $service = $container->get(Test::class);
+     * </code>
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->singleton(Logger::class);
+     *
+     * $container->factory(
+     *     Test::class,
+     *     static fn ($resolver):Test => new Test(
+     *         $resolver->get(Logger::class)
+     *     )
+     * );
+     * </code>
+     *
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Container::register() To register a service definition.
@@ -316,6 +412,21 @@ final class Container implements ResolverBoundary {
      * Registers an already constructed object as a singleton service.
      *
      * The provided instance is returned directly during resolution.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $instance = new Test;
+     *
+     * $container->instance(Test::class, $instance);
+     *
+     * $service = $container->get(Test::class);
+     *
+     * // $service === $instance
+     * </code>
+     *
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Container::register() To register a service definition.
@@ -349,6 +460,18 @@ final class Container implements ResolverBoundary {
      * Associates an additional identifier with another registered service.
      *
      * Aliases preserve the lifetime and identity of the target service.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->singleton(Test::class);
+     * $container->alias(TestInterface::class, Test::class);
+     *
+     * $service = $container->get(TestInterface::class);
+     * </code>
+     *
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Container::register() To register a service definition.
@@ -385,6 +508,23 @@ final class Container implements ResolverBoundary {
      *
      * Bindings are associated with the implementation class rather than a service identifier, allowing them to work
      * with both registered and implicitly constructed services.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->bindParameters(
+     *     Test::class,
+     *     [
+     *         'name' => 'FireHub',
+     *         'enabled' => true
+     *     ]
+     * );
+     *
+     * $service = $container->get(Test::class);
+     * </code>
+     *
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Container::assertMutable() To ensure the container accepts configuration changes.
@@ -419,6 +559,17 @@ final class Container implements ResolverBoundary {
      * Singleton services are shared across the container. Transient services are constructed on each resolution.
      *
      * Scoped services cannot be resolved without an active scope.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->singleton(Test::class);
+     *
+     * $service = $container->get(Test::class);
+     * </code>
+     *
      * @since 1.0.0
      *
      * @template TService of object
@@ -450,6 +601,19 @@ final class Container implements ResolverBoundary {
      * Determines whether the registry contains a definition for the specified service identifier.
      *
      * This operation does not instantiate the service.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->singleton(Test::class);
+     *
+     * $registered = $container->has(Test::class);
+     *
+     * // true
+     * </code>
+     *
      * @since 1.0.0
      *
      * @param class-string $id <p>
@@ -472,6 +636,23 @@ final class Container implements ResolverBoundary {
      * Existing service definitions remain available for resolution.
      *
      * Calling this method multiple times has no additional effect.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->singleton(Test::class);
+     *
+     * $container->freeze();
+     *
+     * // Existing services remain available.
+     * $service = $container->get(Test::class);
+     *
+     * // Further registrations are prohibited.
+     * // $container->singleton(AnotherTest::class);
+     * </code>
+     *
      * @since 1.0.0
      *
      * @return void
@@ -484,6 +665,19 @@ final class Container implements ResolverBoundary {
 
     /**
      * ### Checks whether the container is frozen
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->isFrozen(); // false
+     *
+     * $container->freeze();
+     *
+     * $container->isFrozen(); // true
+     * </code>
+     *
      * @since 1.0.0
      *
      * @return bool True if frozen, false otherwise.
