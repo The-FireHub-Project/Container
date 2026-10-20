@@ -14,7 +14,7 @@
 namespace FireHub\Container;
 
 use FireHub\Core\Boundary\ {
-    Container\Scope as ScopeBoundary, Container as ContainerBoundary
+    Container\Registrar, Container\Scope as ScopeBoundary, Container as ContainerBoundary
 };
 use FireHub\Core\Meta\Enum\Container\Lifetime;
 use FireHub\Container\Definition\ {
@@ -42,7 +42,7 @@ use Closure;
  * resolution scope.
  * @since 1.0.0
  */
-final class Container implements ContainerBoundary {
+final class Container implements ContainerBoundary, Registrar {
 
     /**
      * ### Service registry
@@ -151,11 +151,7 @@ final class Container implements ContainerBoundary {
     }
 
     /**
-     * ### Registers a class-based service
-     *
-     * Associates a service identifier with a concrete implementation class.
-     *
-     * The service is instantiated lazily according to the specified lifetime.
+     * {@inheritDoc}
      *
      * <code>
      * use FireHub\Container\Container;
@@ -169,22 +165,8 @@ final class Container implements ContainerBoundary {
      *
      * @uses \FireHub\Container\Container::register() To register a service definition.
      *
-     * @template TService of object
-     *
-     * @param class-string<TService> $id <p>
-     * Service identifier.
-     * </p>
-     * @param class-string<TService> $class <p>
-     * Concrete implementation class.
-     * </p>
-     * @param \FireHub\Core\Meta\Enum\Container\Lifetime $lifetime [optional] <p>
-     * Service lifetime.
-     * </p>
-     *
      * @throws \FireHub\Container\Exception\ContainerFrozenException If the container is frozen.
      * @throws \FireHub\Container\Exception\DuplicateServiceException If the identifier is already registered.
-     *
-     * @return $this Container instance.
      */
     public function bind (string $id, string $class, Lifetime $lifetime = Lifetime::TRANSIENT):self {
 
@@ -342,11 +324,7 @@ final class Container implements ContainerBoundary {
     }
 
     /**
-     * ### Registers a factory-based service
-     *
-     * Registers a factory responsible for creating the requested service.
-     *
-     * The factory receives a contextual resolver to resolve dependencies within the current resolution context.
+     * {@inheritDoc}
      *
      * <code>
      * use FireHub\Container\Container;
@@ -380,22 +358,8 @@ final class Container implements ContainerBoundary {
      *
      * @uses \FireHub\Container\Container::register() To register a service definition.
      *
-     * @template TService of object
-     *
-     * @param class-string<TService> $id <p>
-     * Service identifier.
-     * </p>
-     * @param Closure(\FireHub\Core\Boundary\Resolver):TService $factory <p>
-     * Service factory.
-     * </p>
-     * @param \FireHub\Core\Meta\Enum\Container\Lifetime $lifetime [optional] <p>
-     * Service lifetime.
-     * </p>
-     *
      * @throws \FireHub\Container\Exception\ContainerFrozenException If the container is frozen.
      * @throws \FireHub\Container\Exception\DuplicateServiceException If the identifier is already registered.
-     *
-     * @return $this Container instance.
      */
     public function factory (string $id, Closure $factory, Lifetime $lifetime = Lifetime::TRANSIENT):self {
 
@@ -407,11 +371,7 @@ final class Container implements ContainerBoundary {
     }
 
     /**
-     * ### Registers an existing service instance
-     *
-     * Registers an already constructed object as a singleton service.
-     *
-     * The provided instance is returned directly during resolution.
+     * {@inheritDoc}
      *
      * <code>
      * use FireHub\Container\Container;
@@ -431,19 +391,8 @@ final class Container implements ContainerBoundary {
      *
      * @uses \FireHub\Container\Container::register() To register a service definition.
      *
-     * @template TService of object
-     *
-     * @param class-string<TService> $id <p>
-     * Service identifier.
-     * </p>
-     * @param TService $instance <p>
-     * Existing service instance.
-     * </p>
-     *
      * @throws \FireHub\Container\Exception\ContainerFrozenException If the container is frozen.
      * @throws \FireHub\Container\Exception\DuplicateServiceException If the identifier is already registered.
-     *
-     * @return $this Container instance.
      */
     public function instance (string $id, object $instance):self {
 
@@ -455,11 +404,7 @@ final class Container implements ContainerBoundary {
     }
 
     /**
-     * ### Registers a service alias
-     *
-     * Associates an additional identifier with another registered service.
-     *
-     * Aliases preserve the lifetime and identity of the target service.
+     * {@inheritDoc}
      *
      * <code>
      * use FireHub\Container\Container;
@@ -476,19 +421,8 @@ final class Container implements ContainerBoundary {
      *
      * @uses \FireHub\Container\Container::register() To register a service definition.
      *
-     * @template TService of object
-     *
-     * @param class-string<TService> $id <p>
-     * Alias identifier.
-     * </p>
-     * @param class-string<TService> $target <p>
-     * Target service identifier.
-     * </p>
-     *
      * @throws \FireHub\Container\Exception\ContainerFrozenException If the container is frozen.
      * @throws \FireHub\Container\Exception\DuplicateServiceException If the identifier is already registered.
-     *
-     * @return $this Container instance.
      */
     public function alias (string $id, string $target):self {
 
