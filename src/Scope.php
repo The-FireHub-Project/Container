@@ -172,9 +172,15 @@ final readonly class Scope implements ScopeBoundary {
 
         } finally {
 
-            $this->state->endRun();
+            try {
 
-            $this->close();
+                $this->state->endRun();
+
+            } finally {
+
+                $this->close();
+
+            }
 
         }
 

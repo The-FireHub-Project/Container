@@ -145,7 +145,7 @@ final class ScopeState {
 
         $this->assertOpen();
 
-        if ($this->running)
+        if ($this->running || $this->active > 0)
             throw new ScopeActiveException;
 
         $this->running = true;
