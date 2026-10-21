@@ -562,6 +562,55 @@ final class Container implements ContainerBoundary, Registrar {
     }
 
     /**
+     * ### Resolves all registered services matching a type
+     *
+     * Resolves all explicitly registered services compatible with the specified class or interface.
+     *
+     * Matching services are returned in registration order while preserving their configured lifetimes.
+     *
+     * Scoped services require an active scope and cannot be resolved directly through the container.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->singleton(FileLogger::class);
+     * $container->singleton(ConsoleLogger::class);
+     *
+     * $loggers = $container->all(LoggerInterface::class);
+     * </code>
+     *
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Resolver::all() To resolve matching services.
+     *
+     * @template TService of object
+     *
+     * @param class-string<TService> $type <p>
+     * Required service type.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service identifier is not registered.
+     * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the resolved service is not compatible
+     * with its registered identifier.
+     * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
+     * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
+     * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     *
+     * @return list<TService> Matching service instances.
+     */
+    public function all (string $type):array {
+
+        return $this->resolver->all(
+            $type,
+            new ResolutionContext
+        );
+
+    }
+
+    /**
      * ### Associates registered services with a tag
      *
      * Groups explicitly registered service identifiers under the specified tag.

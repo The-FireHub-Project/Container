@@ -13,7 +13,9 @@
 
 namespace FireHub\Container\Internal;
 
-use FireHub\Container\Attribute\Tagged;
+use FireHub\Container\Attribute\ {
+    InjectAll, Tagged
+};
 use FireHub\Container\Exception\ServiceInstantiationException;
 use FireHub\Runtime;
 use ReflectionNamedType, ReflectionParameter, ReflectionUnionType, ReflectionIntersectionType;
@@ -116,6 +118,10 @@ final class DependencyPlanCache {
      *
      * @throws \FireHub\Container\Exception\ServiceInstantiationException If multiple tagged attributes are declared,
      * the parameter type is unsupported, or the tag name is empty.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If tagged and collection injection are
+     * combined.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If multiple collection attributes are
+     * declared, the parameter type is unsupported, or the requested service type does not exist.
      *
      * @return \FireHub\Container\Internal\ParameterPlan Compiled parameter plan.
      */
@@ -124,15 +130,25 @@ final class DependencyPlanCache {
         $type = $parameter->getType();
 
         $id = $type instanceof ReflectionNamedType
-            ? $this->matcher->classId($parameter, $type)
-            : null;
+            ? $this->matcher->classId($parameter, $type) : null;
 
         $composite = $type instanceof ReflectionUnionType
         || $type instanceof ReflectionIntersectionType
-            ? $type
-            : null;
+            ? $type : null;
 
         $has_default = $parameter->isDefaultValueAvailable();
+
+        $tag = $this->resolveTag($parameter);
+        $collection = $this->resolveCollection($parameter);
+
+        if ($tag !== null && $collection !== null)
+            throw new ServiceInstantiationException(
+                'Tagged and collection injection cannot be combined.',
+                context: [
+                    'class' => $parameter->getDeclaringClass()?->getName(),
+                    'parameter' => $parameter->getName(),
+                ]
+            );
 
         return new ParameterPlan(
             $parameter,
@@ -142,7 +158,8 @@ final class DependencyPlanCache {
             $has_default
                 ? $parameter->getDefaultValue()
                 : null,
-            $this->resolveTag($parameter)
+            $tag,
+            $collection
         );
 
     }
@@ -210,6 +227,82 @@ final class DependencyPlanCache {
             );
 
         return $attribute->tag;
+
+    }
+
+    /**
+     * ### Resolves collection injection metadata
+     *
+     * Extracts and validates the collection injection attribute associated with a constructor parameter.
+     *
+     * Collection injection requires a non-nullable array parameter and an existing class or interface as its element
+     * type.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Runtime\Arr\Inspection::count() To count the number of declared collection attributes.
+     * @uses \FireHub\Runtime\ObjectModel\Inspection::isClass() To check if the collection type is a class.
+     * @uses \FireHub\Runtime\ObjectModel\Inspection::isInterface() To check if the collection type is an interface.
+     *
+     * @param \ReflectionParameter $parameter <p>
+     * Constructor parameter reflection.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If multiple collection attributes are
+     * declared, the parameter type is unsupported, or the requested service type does not exist.
+     *
+     * @return null|class-string Requested collection element type.
+     */
+    private function resolveCollection (ReflectionParameter $parameter):?string {
+
+        $attributes = $parameter->getAttributes(InjectAll::class);
+
+        if ($attributes === [])
+            return null;
+
+        if (Runtime\Arr\Inspection::count($attributes) > 1)
+            throw new ServiceInstantiationException(
+                'Multiple collection injection attributes are not supported.',
+                context: [
+                    'class' => $parameter->getDeclaringClass()?->getName(),
+                    'parameter' => $parameter->getName(),
+                ]
+            );
+
+        $type = $parameter->getType();
+
+        if (
+            !$type instanceof ReflectionNamedType
+            || $type->getName() !== 'array'
+            || $type->allowsNull()
+        ) throw new ServiceInstantiationException(
+            'Collection injection requires a non-nullable array parameter.',
+            context: [
+                'class' => $parameter->getDeclaringClass()?->getName(),
+                'parameter' => $parameter->getName(),
+            ]
+        );
+
+        /** @var \FireHub\Container\Attribute\InjectAll $attribute */
+        $attribute = $attributes[0]->newInstance();
+
+        $collection = $attribute->type;
+
+        if (
+            $collection === ''
+            || (
+                !Runtime\ObjectModel\Inspection::isClass($collection)
+                && !Runtime\ObjectModel\Inspection::isInterface($collection)
+            )
+        ) throw new ServiceInstantiationException(
+            'Collection injection requires an existing class or interface.',
+            context: [
+                'class' => $parameter->getDeclaringClass()?->getName(),
+                'parameter' => $parameter->getName(),
+                'type' => $collection,
+            ]
+        );
+
+        return $collection;
 
     }
 

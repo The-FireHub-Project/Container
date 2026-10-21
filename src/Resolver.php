@@ -24,7 +24,8 @@ use FireHub\Container\Internal\ {
     TagRegistry, TypeMatcher
 };
 use FireHub\Container\Exception\ {
-    ScopeRequiredException, ServiceNotFoundException, ServiceTypeMismatchException, UnsupportedDefinitionException
+    CircularDependencyException, ScopeRequiredException, ServiceNotFoundException, ServiceTypeMismatchException,
+    UnsupportedDefinitionException
 };
 use FireHub\Runtime;
 
@@ -51,6 +52,15 @@ final readonly class Resolver implements ResolverBoundary {
      * @since 1.0.0
      */
     private ConstructorMetadataCache $metadata;
+
+    /**
+     * ### Dependency type matcher
+     *
+     * Provides shared type compatibility checks for dependency resolution, candidate selection, and collection
+     * injection.
+     * @since 1.0.0
+     */
+    private TypeMatcher $matcher;
 
     /**
      * ### Reusable dependency autowirer
@@ -94,31 +104,52 @@ final readonly class Resolver implements ResolverBoundary {
 
         $this->metadata = new ConstructorMetadataCache;
 
-        $matcher = new TypeMatcher(
+        $this->matcher = new TypeMatcher(
             $this->metadata
         );
 
         $selector = new CandidateSelector(
-            $matcher,
+            $this->matcher,
             fn (string $id):bool => $this->has($id),
             fn ():iterable => $this->registry->implementations()
         );
 
         $plans = new DependencyPlanCache(
             $this->metadata,
-            $matcher
+            $this->matcher
         );
 
         $this->autowirer = new Autowirer(
             fn (string $id, ResolutionContext $context):object => $this->resolve($id, $context),
             fn (string $tag, ResolutionContext $context):array => $this->tagged($tag, $context),
+            fn (string $type, ResolutionContext $context):array => $this->all($type, $context),
             fn (string $id):bool => $this->has($id),
-            $matcher,
+            $this->matcher,
             $selector,
             $plans,
             $parameters,
             new ContextualCandidateSelector($contextual)
         );
+
+    }
+
+    /**
+     * ### Checks whether a service is registered
+     *
+     * Checks whether a service identifier exists without constructing or resolving its instance.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Registry::has() To check for service existence.
+     *
+     * @param class-string $id <p>
+     * Service identifier.
+     * </p>
+     *
+     * @return bool True if the service is registered.
+     */
+    public function has (string $id):bool {
+
+        return $this->registry->has($id);
 
     }
 
@@ -203,6 +234,128 @@ final readonly class Resolver implements ResolverBoundary {
 
             return $this->resolve(
                 $id,
+                new ResolutionContext(
+                    scoped: $scoped,
+                    scope: $scope
+                )
+            );
+
+        } finally {
+
+            $scope->leave();
+
+        }
+
+    }
+
+    /**
+     * ### Resolves all registered services matching a type
+     *
+     * Resolves explicitly registered services compatible with the specified class or interface.
+     *
+     * Services are returned in registration order while preserving their configured lifetimes and the active
+     * resolution context.
+     *
+     * Service aliases are resolved to their underlying targets and do not produce duplicate collection entries.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Registry::all() To retrieve all registered service identifiers.
+     * @uses \FireHub\Container\Resolver::canonicalId() To resolve service aliases.
+     * @uses \FireHub\Container\Resolver::matchesCollectionType() To check whether a service matches the specified type.
+     *
+     * @template TService of object
+     *
+     * @param class-string<TService> $type <p>
+     * Required service type.
+     * </p>
+     * @param \FireHub\Container\Internal\ResolutionContext $context <p>
+     * Active resolution context.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service identifier is not registered.
+     * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the resolved service is not compatible
+     * with its registered identifier.
+     * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
+     * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
+     * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     *
+     * @return list<TService> Matching service instances.
+     */
+    public function all (string $type, ResolutionContext $context):array {
+
+        $services = []; $resolved = [];
+        foreach ($this->registry->all() as $id => $definition) {
+
+            $target = $this->canonicalId($id);
+
+            if (isset($resolved[$target]))
+                continue;
+
+            if (!$this->matchesCollectionType($id, $target, $type))
+                continue;
+
+            $instance = $this->resolve($id, $context);
+
+            if (!$instance instanceof $type)
+                throw new ServiceTypeMismatchException(
+                    context: [
+                        'service' => $id,
+                        'implementation' => $instance::class,
+                    ]
+                );
+
+            $services[] = $instance;
+
+            $resolved[$target] = true;
+
+        }
+
+        return $services;
+
+    }
+
+    /**
+     * ### Resolves all matching services within a scope
+     *
+     * Resolves collection services using the supplied scoped instance store and scope state.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Resolver::all() To resolve all matching services.
+     * @uses \FireHub\Container\Internal\ScopeState::enter() To enter the scope.
+     * @uses \FireHub\Container\Internal\ScopeState::leave() To leave the scope.
+     *
+     * @template TService of object
+     *
+     * @param class-string<TService> $type <p>
+     * Required service type.
+     * </p>
+     * @param \FireHub\Container\Internal\InstanceStore $scoped <p>
+     * Scoped instance store.
+     * </p>
+     * @param \FireHub\Container\Internal\ScopeState $scope <p>
+     * Scope state.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service identifier is not registered.
+     * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the resolved service is not compatible
+     * with its registered identifier.
+     * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
+     * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
+     * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
+     *
+     * @return list<TService> Matching service instances.
+     */
+    public function allScoped (string $type, InstanceStore $scoped, ScopeState $scope):array {
+
+        $scope->enter();
+
+        try {
+
+            return $this->all(
+                $type,
                 new ResolutionContext(
                     scoped: $scoped,
                     scope: $scope
@@ -316,26 +469,6 @@ final readonly class Resolver implements ResolverBoundary {
             $scope->leave();
 
         }
-
-    }
-
-    /**
-     * ### Checks whether a service is registered
-     *
-     * Checks whether a service identifier exists without constructing or resolving its instance.
-     * @since 1.0.0
-     *
-     * @uses \FireHub\Container\Registry::has() To check for service existence.
-     *
-     * @param class-string $id <p>
-     * Service identifier.
-     * </p>
-     *
-     * @return bool True if the service is registered.
-     */
-    public function has (string $id):bool {
-
-        return $this->registry->has($id);
 
     }
 
@@ -593,6 +726,87 @@ final readonly class Resolver implements ResolverBoundary {
 
             }
         );
+
+    }
+
+    /**
+     * ### Resolves the canonical service identifier
+     *
+     * Follows registered service aliases until a non-alias definition is reached.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Registry::find() To retrieve a service definition.
+     *
+     * @param class-string $id <p>
+     * Service identifier.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
+     *
+     * @return class-string Canonical service identifier.
+     */
+    private function canonicalId (string $id):string {
+
+        $visited = []; $path = [];
+        while (true) {
+
+            if (isset($visited[$id]))
+                throw new CircularDependencyException(
+                    context: [
+                        'path' => [...$path, $id],
+                    ]
+                );
+
+            $visited[$id] = true;
+            $path[] = $id;
+
+            $definition = $this->registry->find($id);
+
+            if (!$definition instanceof Alias)
+                return $id;
+
+            $id = $definition->target;
+
+        }
+
+    }
+
+    /**
+     * ### Checks collection candidate compatibility
+     *
+     * Determines whether a registered service is compatible with the requested collection element type.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Registry::find() To retrieve the service definition.
+     * @uses \FireHub\Container\Internal\TypeMatcher::matches() To check if the service identifier matches the type.
+     *
+     * @param class-string $id <p>
+     * Service identifier.
+     * </p>
+     * @param class-string $target <p>
+     * Canonical service identifier.
+     * </p>
+     * @param class-string $type <p>
+     * Required collection element type.
+     * </p>
+     *
+     * @return bool True if the service matches the requested type.
+     */
+    private function matchesCollectionType (string $id, string $target, string $type):bool {
+
+        if ($this->matcher->matches($id, $type))
+            return true;
+
+        if ($this->matcher->matches($target, $type))
+            return true;
+
+        $definition = $this->registry->find($target);
+
+        return match (true) {
+            $definition instanceof Cls => $this->matcher->matches($definition->class, $type),
+            $definition instanceof Instance => $definition->instance instanceof $type,
+            default => false
+        };
 
     }
 

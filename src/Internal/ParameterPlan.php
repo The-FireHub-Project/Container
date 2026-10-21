@@ -51,6 +51,9 @@ final readonly class ParameterPlan {
      * @param null|non-empty-string $tag [optional] <p>
      * Service tag associated with the constructor parameter.
      * </p>
+     * @param null|class-string $collection [optional] <p>
+     * Service type requested for collection injection.
+     * </p>
      *
      * @return void
      */
@@ -60,7 +63,8 @@ final readonly class ParameterPlan {
         public ReflectionUnionType|ReflectionIntersectionType|null $composite,
         public bool $hasDefault,
         public mixed $default,
-        public ?string $tag = null
+        public ?string $tag = null,
+        public ?string $collection = null
     ) {}
 
 }

@@ -41,6 +41,9 @@ final readonly class Autowirer {
      * @param Closure(non-empty-string, \FireHub\Container\Internal\ResolutionContext):list<object> $resolve_tagged <p>
      * Context-aware tagged service collection resolver.
      * </p>
+     * @param Closure(class-string, \FireHub\Container\Internal\ResolutionContext):list<object> $resolve_all <p>
+     * Context-aware service collection resolver.
+     * </p>
      * @param Closure(class-string):bool $has <p>
      * Explicit service registration checker.
      * </p>
@@ -65,6 +68,7 @@ final readonly class Autowirer {
     public function __construct (
         private Closure $resolve,
         private Closure $resolve_tagged,
+        private Closure $resolve_all,
         private Closure $has,
         private TypeMatcher $matcher,
         private CandidateSelector $selector,
@@ -165,6 +169,9 @@ final readonly class Autowirer {
 
         if ($plan->tag !== null)
             return ($this->resolve_tagged)($plan->tag, $context);
+
+        if ($plan->collection !== null)
+            return ($this->resolve_all)($plan->collection, $context);
 
         $id = $this->contextual_selector->select($class, $plan);
 

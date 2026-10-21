@@ -246,6 +246,62 @@ final readonly class Scope implements ScopeBoundary {
     }
 
     /**
+     * ### Resolves all matching services within the current scope
+     *
+     * Resolves all explicitly registered services compatible with the specified class or interface.
+     *
+     * Scoped services are reused within the current scope, singleton services are shared with the parent container,
+     * and transient services are created for each resolution.
+     *
+     * Resolution is prohibited after the scope has been closed.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->scoped(FileLogger::class);
+     * $container->singleton(ConsoleLogger::class);
+     *
+     * $scope = $container->createScope();
+     *
+     * $loggers = $scope->all(LoggerInterface::class);
+     *
+     * $scope->close();
+     * </code>
+     *
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Resolver::allScoped() To resolve matching services within the scope.
+     *
+     * @template TService of object
+     *
+     * @param class-string<TService> $type <p>
+     * Required service type.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service identifier is not registered.
+     * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the resolved service is not compatible
+     * with its registered identifier.
+     * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
+     * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
+     * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
+     *
+     * @return list<TService> Matching service instances.
+     */
+    public function all (string $type):array {
+
+        return $this->resolver->allScoped(
+            $type,
+            $this->instances,
+            $this->state
+        );
+
+    }
+
+    /**
      * ### Executes a callback within the scope
      *
      * Executes the provided callback using this scope as its dependency resolver.
