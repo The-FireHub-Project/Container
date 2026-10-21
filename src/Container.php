@@ -21,7 +21,7 @@ use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance
 };
 use FireHub\Container\Internal\ {
-    InstanceStore, ParameterBindingRegistry
+    ContextualBindingRegistry, InstanceStore, ParameterBindingRegistry
 };
 use FireHub\Container\Exception\ContainerFrozenException;
 use Closure;
@@ -63,6 +63,12 @@ final class Container implements ContainerBoundary, Registrar {
     private readonly ParameterBindingRegistry $parameters;
 
     /**
+     * ### Contextual dependency binding registry
+     * @since 1.0.0
+     */
+    private readonly ContextualBindingRegistry $contextual;
+
+    /**
      * ### Container freeze state
      * @var bool
      */
@@ -78,11 +84,13 @@ final class Container implements ContainerBoundary, Registrar {
 
         $this->registry = new Registry;
         $this->parameters = new ParameterBindingRegistry;
+        $this->contextual = new ContextualBindingRegistry;
 
         $this->resolver = new Resolver(
             $this->registry,
             new InstanceStore,
-            $this->parameters
+            $this->parameters,
+            $this->contextual
         );
 
     }
@@ -145,6 +153,48 @@ final class Container implements ContainerBoundary, Registrar {
         $this->assertMutable();
 
         $this->registry->register($id, $definition);
+
+        return $this;
+
+    }
+
+    /**
+     * ### Registers a contextual dependency binding
+     *
+     * Associates a specific consumer class with an implementation to be used when resolving the specified dependency.
+     *
+     * Contextual bindings apply only to the exact consumer class and do not affect global service registrations.
+     *
+     * The target service retains its configured lifetime.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Container::assertMutable()
+     * @uses \FireHub\Container\Internal\ContextualBindingRegistry::register()
+     *
+     * @param class-string $consumer <p>
+     * Consumer implementation class.
+     * </p>
+     * @param class-string $dependency <p>
+     * Required dependency contract.
+     * </p>
+     * @param class-string $implementation <p>
+     * Target service identifier.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\ContainerFrozenException If the container is frozen.
+     * @throws \FireHub\Container\Exception\DuplicateContextualBindingException If the binding already exists.
+     *
+     * @return $this Container instance.
+     */
+    public function bindContextual (string $consumer, string $dependency, string $implementation):self {
+
+        $this->assertMutable();
+
+        $this->contextual->register(
+            $consumer,
+            $dependency,
+            $implementation
+        );
 
         return $this;
 

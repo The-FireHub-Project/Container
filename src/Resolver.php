@@ -19,8 +19,9 @@ use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance, Service
 };
 use FireHub\Container\Internal\ {
-    Autowirer, CandidateSelector, ConstructorMetadataCache, ContextualResolver, DependencyPlanCache, InstanceStore,
-    ParameterBindingRegistry, ResolutionContext, ScopeState, TypeMatcher
+    Autowirer, CandidateSelector, ConstructorMetadataCache, ContextualBindingRegistry, ContextualCandidateSelector,
+    ContextualResolver, DependencyPlanCache, InstanceStore, ParameterBindingRegistry, ResolutionContext, ScopeState,
+    TypeMatcher
 };
 use FireHub\Container\Exception\ {
     ScopeRequiredException, ServiceNotFoundException, ServiceTypeMismatchException, UnsupportedDefinitionException
@@ -74,13 +75,17 @@ final readonly class Resolver implements ResolverBoundary {
      * @param \FireHub\Container\Internal\ParameterBindingRegistry $parameters <p>
      * Parameter binding registry.
      * </p>
+     * @param \FireHub\Container\Internal\ContextualBindingRegistry $contextual <p>
+     * Contextual binding registry.
+     * </p>
      *
      * @return void
      */
     public function __construct (
         private Registry $registry,
         private InstanceStore $singletons,
-        ParameterBindingRegistry $parameters
+        ParameterBindingRegistry $parameters,
+        ContextualBindingRegistry $contextual
     ) {
 
         $this->metadata = new ConstructorMetadataCache;
@@ -101,13 +106,13 @@ final readonly class Resolver implements ResolverBoundary {
         );
 
         $this->autowirer = new Autowirer(
-            fn (string $id, ResolutionContext $context):object =>
-            $this->resolve($id, $context),
+            fn (string $id, ResolutionContext $context):object => $this->resolve($id, $context),
             fn (string $id):bool => $this->has($id),
             $matcher,
             $selector,
             $plans,
-            $parameters
+            $parameters,
+            new ContextualCandidateSelector($contextual)
         );
 
     }
