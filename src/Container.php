@@ -21,9 +21,12 @@ use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance
 };
 use FireHub\Container\Internal\ {
-    ContextualBindingRegistry, InstanceStore, ParameterBindingRegistry
+    ContextualBindingRegistry, InstanceStore, ParameterBindingRegistry, ResolutionContext, TagRegistry
 };
-use FireHub\Container\Exception\ContainerFrozenException;
+use FireHub\Container\Exception\ {
+    ContainerFrozenException, InvalidTagNameException, ServiceNotFoundException
+};
+use FireHub\Runtime;
 use Closure;
 
 /**
@@ -69,6 +72,12 @@ final class Container implements ContainerBoundary, Registrar {
     private readonly ContextualBindingRegistry $contextual;
 
     /**
+     * ### Service tag registry
+     * @since 1.0.0
+     */
+    private readonly TagRegistry $tags;
+
+    /**
      * ### Container freeze state
      * @var bool
      */
@@ -85,12 +94,14 @@ final class Container implements ContainerBoundary, Registrar {
         $this->registry = new Registry;
         $this->parameters = new ParameterBindingRegistry;
         $this->contextual = new ContextualBindingRegistry;
+        $this->tags = new TagRegistry;
 
         $this->resolver = new Resolver(
             $this->registry,
             new InstanceStore,
             $this->parameters,
-            $this->contextual
+            $this->contextual,
+            $this->tags
         );
 
     }
@@ -166,6 +177,21 @@ final class Container implements ContainerBoundary, Registrar {
      * Contextual bindings apply only to the exact consumer class and do not affect global service registrations.
      *
      * The target service retains its configured lifetime.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->bindContextual(
+     *     FrontendService::class,
+     *     LoggerInterface::class,
+     *     FileLogger::class
+     * );
+     *
+     * $frontend = $container->get(FrontendService::class);
+     * </code>
+     *
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Container::assertMutable()
@@ -532,6 +558,288 @@ final class Container implements ContainerBoundary, Registrar {
         $this->parameters->register($class, $parameters);
 
         return $this;
+
+    }
+
+    /**
+     * ### Resolves all registered services matching a type
+     *
+     * Resolves all explicitly registered services compatible with the specified class or interface.
+     *
+     * Matching services are returned in registration order while preserving their configured lifetimes.
+     *
+     * Scoped services require an active scope and cannot be resolved directly through the container.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->singleton(FileLogger::class);
+     * $container->singleton(ConsoleLogger::class);
+     *
+     * $loggers = $container->all(LoggerInterface::class);
+     * </code>
+     *
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Resolver::all() To resolve matching services.
+     *
+     * @template TService of object
+     *
+     * @param class-string<TService> $type <p>
+     * Required service type.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service identifier is not registered.
+     * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the resolved service is not compatible
+     * with its registered identifier.
+     * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
+     * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
+     * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     *
+     * @return list<TService> Matching service instances.
+     */
+    public function all (string $type):array {
+
+        return $this->resolver->all(
+            $type,
+            new ResolutionContext
+        );
+
+    }
+
+    /**
+     * ### Associates registered services with a tag
+     *
+     * Groups explicitly registered service identifiers under the specified tag.
+     *
+     * Only services registered in the container can be tagged. Implicitly constructible classes are not considered
+     * registered services.
+     *
+     * Service identifiers are stored in registration order, and duplicate identifiers within the same tag are
+     * ignored.
+     *
+     * Registration is atomic: all service identifiers are validated before any tag association is created.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->singleton(AuthenticationMiddleware::class);
+     * $container->singleton(AuthorizationMiddleware::class);
+     * $container->singleton(LoggingMiddleware::class);
+     *
+     * $container->tag(
+     *     'http.middleware',
+     *     AuthenticationMiddleware::class,
+     *     AuthorizationMiddleware::class,
+     *     LoggingMiddleware::class
+     * );
+     * </code>
+     *
+     * You can also tag services with multiple calls to the `tag()` method:
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->singleton(AuthenticationMiddleware::class);
+     * $container->singleton(AuthorizationMiddleware::class);
+     * $container->singleton(LoggingMiddleware::class);
+     *
+     * $container->tag(
+     *     'http.middleware',
+     *     AuthenticationMiddleware::class
+     * );
+     *
+     * $container->tag(
+     *     'http.middleware',
+     *     AuthorizationMiddleware::class,
+     *     LoggingMiddleware::class
+     * );
+     * </code>
+     *
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Container::assertMutable() To ensure the container is not frozen.
+     * @uses \FireHub\Container\Container::has() To verify explicit service registrations.
+     * @uses \FireHub\Container\Internal\TagRegistry::register() To register service tag associations.
+     * @uses \FireHub\Runtime\Str\SB\Transform::trim() To validate tag names.
+     *
+     * @param non-empty-string $tag <p>
+     * Tag name.
+     * </p>
+     * @param class-string ...$services <p>
+     * Explicitly registered service identifiers.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\ContainerFrozenException If the container is frozen.
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If a service is not explicitly registered.
+     * @throws \FireHub\Container\Exception\InvalidTagNameException If the tag name is empty.
+     *
+     * @return $this Container instance.
+     */
+    public function tag (string $tag, string ...$services):self {
+
+        $this->assertMutable();
+
+        if (Runtime\Str\SB\Transform::trim($tag) === '')
+            throw new InvalidTagNameException;
+
+        foreach ($services as $service)
+            if (!$this->has($service))
+                throw new ServiceNotFoundException;
+
+        $this->tags->register($tag, ...$services);
+
+        return $this;
+
+    }
+
+    /**
+     * ### Checks whether a service tag exists
+     *
+     * Determines whether the specified tag contains at least one registered service identifier.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->singleton(AuthenticationMiddleware::class);
+     * $container->singleton(AuthorizationMiddleware::class);
+     * $container->singleton(LoggingMiddleware::class);
+     *
+     * $container->tag(
+     *     'http.middleware',
+     *     AuthenticationMiddleware::class,
+     *     AuthorizationMiddleware::class,
+     *     LoggingMiddleware::class
+     * );
+     *
+     * $container->hasTag('http.middleware');
+     *
+     * // true
+     * </code>
+     *
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\TagRegistry::has() To check tag registration.
+     *
+     * @param non-empty-string $tag <p>
+     * Tag name.
+     * </p>
+     *
+     * @return bool True if the tag contains registered services, otherwise false.
+     */
+    public function hasTag (string $tag):bool {
+
+        return $this->tags->has($tag);
+
+    }
+
+    /**
+     * ### Retrieves service identifiers associated with a tag
+     *
+     * Returns explicitly registered service identifiers in their original registration order without resolving or
+     * instantiating services.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->singleton(AuthenticationMiddleware::class);
+     * $container->singleton(AuthorizationMiddleware::class);
+     * $container->singleton(LoggingMiddleware::class);
+     *
+     * $container->tag(
+     *     'http.middleware',
+     *     AuthenticationMiddleware::class,
+     *     AuthorizationMiddleware::class,
+     *     LoggingMiddleware::class
+     * );
+     *
+     * $container->taggedIds('http.middleware');
+     *
+     * // [
+     * //     AuthenticationMiddleware::class,
+     * //     AuthorizationMiddleware::class,
+     * //     LoggingMiddleware::class
+     * // ]
+     * </code>
+     *
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\TagRegistry::get() To retrieve tagged service identifiers.
+     *
+     * @param non-empty-string $tag <p>
+     * Tag name.
+     * </p>
+     *
+     * @return list<class-string> Tagged service identifiers.
+     */
+    public function taggedIds (string $tag):array {
+
+        return $this->tags->get($tag);
+
+    }
+
+    /**
+     * ### Resolves all services associated with a tag
+     *
+     * Returns tagged service instances in their registration order.
+     *
+     * Each service retains its configured lifetime. Scoped services require an active scope.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->singleton(AuthenticationMiddleware::class);
+     * $container->singleton(AuthorizationMiddleware::class);
+     * $container->singleton(LoggingMiddleware::class);
+     *
+     * $container->tag(
+     *     'http.middleware',
+     *     AuthenticationMiddleware::class,
+     *     AuthorizationMiddleware::class,
+     *     LoggingMiddleware::class
+     * );
+     *
+     * $container->tagged('http.middleware');
+     * </code>
+     *
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Resolver::tagged() To resolve tagged services.
+     *
+     * @param non-empty-string $tag <p>
+     * Service tag name.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If a tagged service is no longer registered.
+     * @throws \FireHub\Container\Exception\ScopeRequiredException If a scoped service is resolved without a scope.
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service identifier is not registered.
+     * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the resolved service is not compatible
+     * with its registered identifier.
+     * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
+     * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
+     * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     *
+     * @return list<object> Resolved service instances.
+     */
+    public function tagged (string $tag):array {
+
+        return $this->resolver->tagged(
+            $tag,
+            new ResolutionContext
+        );
 
     }
 

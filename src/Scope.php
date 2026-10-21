@@ -71,6 +71,78 @@ final readonly class Scope implements ScopeBoundary {
     }
 
     /**
+     * ### Resolves tagged services within the current scope
+     *
+     * Resolves all services associated with the specified tag using the current scope.
+     *
+     * Scoped services are reused within this scope, singleton services are shared with the parent container, and
+     * transient services are constructed on each resolution.
+     *
+     * Resolution is prohibited after the scope has been closed.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->singleton(AuthenticationMiddleware::class);
+     * $container->scoped(AuthorizationMiddleware::class);
+     * $container->transient(LoggingMiddleware::class);
+     *
+     * $container->tag(
+     *     'http.middleware',
+     *     AuthenticationMiddleware::class,
+     *     AuthorizationMiddleware::class,
+     *     LoggingMiddleware::class
+     * );
+     *
+     * $scope = $container->createScope();
+     *
+     * $first = $scope->tagged('http.middleware');
+     * $second = $scope->tagged('http.middleware');
+     *
+     * // Singleton and scoped instances are reused.
+     * $first[0] === $second[0]; // true
+     * $first[1] === $second[1]; // true
+     *
+     * // Transient instances are created on each resolution.
+     * $first[2] !== $second[2]; // true
+     *
+     * $scope->close();
+     * </code>
+     *
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Resolver::taggedScoped() To resolve tagged services within the scope.
+     *
+     * @param non-empty-string $tag <p>
+     * Service tag name.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If a tagged service is no longer registered.
+     * @throws \FireHub\Container\Exception\ScopeRequiredException If a scoped service is resolved without a scope.
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service identifier is not registered.
+     * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the resolved service is not compatible
+     * with its registered identifier.
+     * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
+     * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
+     * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     *
+     * @return list<object> Resolved service instances.
+     */
+    public function tagged (string $tag):array {
+
+        return $this->resolver->taggedScoped(
+            $tag,
+            $this->instances,
+            $this->state
+        );
+
+    }
+
+    /**
      * ### Resolves a registered service
      *
      * Resolves the requested service within the current scope.
@@ -79,6 +151,25 @@ final readonly class Scope implements ScopeBoundary {
      * transient services are created on each resolution.
      *
      * Resolution is prohibited after the scope has been closed.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->scoped(DatabaseConnection::class);
+     *
+     * $scope = $container->createScope();
+     *
+     * $first = $scope->get(DatabaseConnection::class);
+     * $second = $scope->get(DatabaseConnection::class);
+     *
+     * // Scoped services are reused within the same scope.
+     * $first === $second; // true
+     *
+     * $scope->close();
+     * </code>
+     *
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Resolver::getScoped() To resolve a scoped service.
@@ -89,12 +180,13 @@ final readonly class Scope implements ScopeBoundary {
      * Service identifier.
      * </p>
      *
-     * @throws \FireHub\Container\Exception\ScopeClosedException If the scope has been closed.
      * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service identifier is not registered.
-     * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the resolved service is not compatible
-     * with its registered identifier.
+     * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the resolved service is not compatible with its registered identifier.
      * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
      * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
+     * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
+     * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
      *
      * @return TService Resolved service.
      */
@@ -116,6 +208,22 @@ final readonly class Scope implements ScopeBoundary {
      * The operation does not instantiate the service.
      *
      * Registration checks are prohibited after the scope has been closed.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->singleton(Logger::class);
+     *
+     * $scope = $container->createScope();
+     *
+     * $scope->has(Logger::class); // true
+     * $scope->has(Cache::class);  // false
+     *
+     * $scope->close();
+     * </code>
+     *
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Internal\ScopeState::assertOpen() To check if the scope is open.
@@ -138,6 +246,62 @@ final readonly class Scope implements ScopeBoundary {
     }
 
     /**
+     * ### Resolves all matching services within the current scope
+     *
+     * Resolves all explicitly registered services compatible with the specified class or interface.
+     *
+     * Scoped services are reused within the current scope, singleton services are shared with the parent container,
+     * and transient services are created for each resolution.
+     *
+     * Resolution is prohibited after the scope has been closed.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->scoped(FileLogger::class);
+     * $container->singleton(ConsoleLogger::class);
+     *
+     * $scope = $container->createScope();
+     *
+     * $loggers = $scope->all(LoggerInterface::class);
+     *
+     * $scope->close();
+     * </code>
+     *
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Resolver::allScoped() To resolve matching services within the scope.
+     *
+     * @template TService of object
+     *
+     * @param class-string<TService> $type <p>
+     * Required service type.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service identifier is not registered.
+     * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the resolved service is not compatible
+     * with its registered identifier.
+     * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
+     * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
+     * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
+     *
+     * @return list<TService> Matching service instances.
+     */
+    public function all (string $type):array {
+
+        return $this->resolver->allScoped(
+            $type,
+            $this->instances,
+            $this->state
+        );
+
+    }
+
+    /**
      * ### Executes a callback within the scope
      *
      * Executes the provided callback using this scope as its dependency resolver.
@@ -145,6 +309,31 @@ final readonly class Scope implements ScopeBoundary {
      * The scope is automatically closed after callback execution, including when the callback throws an exception.
      *
      * Nested execution of the same scope is not permitted.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     * use FireHub\Core\Boundary\Resolver;
+     *
+     * $container = new Container;
+     *
+     * $container->scoped(DatabaseConnection::class);
+     *
+     * $scope = $container->createScope();
+     *
+     * $scope->run(
+     *     function (Resolver $resolver):void {
+     *
+     *         $connection = $resolver->get(DatabaseConnection::class);
+     *
+     *         $connection->connect();
+     *
+     *     }
+     * );
+     *
+     * // The scope is automatically closed after execution.
+     * $scope->isClosed(); // true
+     * </code>
+     *
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Internal\ScopeState::beginRun() To begin scope execution.
@@ -188,6 +377,21 @@ final readonly class Scope implements ScopeBoundary {
 
     /**
      * ### Checks whether the scope is closed
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $scope = $container->createScope();
+     *
+     * $scope->isClosed(); // false
+     *
+     * $scope->close();
+     *
+     * $scope->isClosed(); // true
+     * </code>
+     *
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Internal\ScopeState::isClosed() To check the scope lifecycle state.
@@ -209,6 +413,25 @@ final readonly class Scope implements ScopeBoundary {
      *
      * Closing a scope does not affect singleton instances maintained by the parent container or instances stored in
      * other scopes.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->scoped(DatabaseConnection::class);
+     *
+     * $scope = $container->createScope();
+     *
+     * $connection = $scope->get(DatabaseConnection::class);
+     *
+     * // Release cached scoped instances.
+     * $scope->close();
+     *
+     * // The scope can no longer resolve services.
+     * $scope->isClosed(); // true
+     * </code>
+     *
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Internal\ScopeState::close() To close the scope.
