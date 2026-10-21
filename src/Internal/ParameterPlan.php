@@ -21,6 +21,8 @@ use ReflectionParameter, ReflectionUnionType, ReflectionIntersectionType;
  * Stores the statically determined information required to resolve a constructor parameter.
  *
  * Dependency availability and candidate selection remain dynamic and are evaluated during plan execution.
+ *
+ * Tagged service injection metadata is extracted during plan compilation and reused for later dependency resolutions.
  * @since 1.0.0
  *
  * @internal
@@ -46,6 +48,9 @@ final readonly class ParameterPlan {
      * @param mixed $default <p>
      * Default parameter value.
      * </p>
+     * @param null|non-empty-string $tag [optional] <p>
+     * Service tag associated with the constructor parameter.
+     * </p>
      *
      * @return void
      */
@@ -54,7 +59,8 @@ final readonly class ParameterPlan {
         public ?string $id,
         public ReflectionUnionType|ReflectionIntersectionType|null $composite,
         public bool $hasDefault,
-        public mixed $default
+        public mixed $default,
+        public ?string $tag = null
     ) {}
 
 }

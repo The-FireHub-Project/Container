@@ -111,6 +111,7 @@ final readonly class Resolver implements ResolverBoundary {
 
         $this->autowirer = new Autowirer(
             fn (string $id, ResolutionContext $context):object => $this->resolve($id, $context),
+            fn (string $tag, ResolutionContext $context):array => $this->tagged($tag, $context),
             fn (string $id):bool => $this->has($id),
             $matcher,
             $selector,
