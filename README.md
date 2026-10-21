@@ -22,10 +22,6 @@
   /></a>
 </h1>
 
-[![PHPStan](https://github.com/The-FireHub-Project/Container/actions/workflows/PHPStan.yml/badge.svg?branch=develop)](https://github.com/The-FireHub-Project/Container/actions/workflows/PHPStan.yml)
-[![PHPUnit](https://github.com/The-FireHub-Project/Container/actions/workflows/PHPUnit.yml/badge.svg?branch=develop)](https://github.com/The-FireHub-Project/Container/actions/workflows/PHPUnit.yml)
-[![Codecov](https://codecov.io/gh/The-FireHub-Project/Container/branch/develop/graph/badge.svg?token=XW2YEONF51)](https://app.codecov.io/gh/The-FireHub-Project/Container/tree/develop)
-
 <p>
   <a href="https://github.com/The-FireHub-Project/Container">
     <img
@@ -77,47 +73,69 @@ This repository serves as a foundational runtime component for FireHub applicati
 
 ---
 
-## <img src="https://raw.githubusercontent.com/The-FireHub-Project/the-firehub-project.github.io/master/resources/graphics/icons/firehub.svg" width="15" alt="FireHub Icon"> Development Branch
+## <img src="https://raw.githubusercontent.com/The-FireHub-Project/the-firehub-project.github.io/master/resources/graphics/icons/firehub.svg" width="15" alt="FireHub Icon"> Repository Purpose
 
-⚠️ **This is the `develop` branch**
+FireHub Container is the dependency injection and service resolution component of the FireHub ecosystem.
 
-- Unstable
-- APIs may change without notice
-- Not intended for production use
+Built on the contracts provided by FireHub Core, it supplies the mechanisms required to register, construct, resolve, and manage application services.
 
-## <img src="https://raw.githubusercontent.com/The-FireHub-Project/the-firehub-project.github.io/master/resources/graphics/icons/firehub.svg" width="15" alt="FireHub Icon"> Branch Purpose
+The purpose of this repository is to centralize dependency management while preserving separation of concerns between service definitions, runtime implementation, and application execution.
 
-The `develop` branch is the **primary integration branch** for all ongoing development.
+The Container architecture is designed to support:
 
-It serves as the staging area where:
-- Feature branches are merged
-- Bug fixes are integrated
-- Experimental work is stabilized
-- Code is prepared for upcoming releases
+- Service registration and dependency resolution
+- Interface-to-implementation bindings
+- Instance, factory, and class-based service definitions
+- Singleton and transient service lifetimes
+- Dependency graph resolution and circular dependency detection
+- Immutable service registrations after container construction
+- Future support for autowiring and execution-scoped services
 
-All **release branches** are created **from `develop`**.
+FireHub Container follows the architectural principles of The FireHub Project by separating responsibilities between contracts, dependency management, and application lifecycle orchestration.
 
-## Stability Guarantee
+The Container does not control application execution or kernel lifecycle transitions. Instead, it provides dependency management services that can be integrated into applications through the appropriate bootstrap and composition mechanisms.
 
-❌ No backward compatibility guarantee  
-❌ APIs may change without notice  
-❌ Behavior may be incomplete or inconsistent  
-❌ Breaking changes are expected
+## <img src="https://raw.githubusercontent.com/The-FireHub-Project/the-firehub-project.github.io/master/resources/graphics/icons/firehub.svg" width="15" alt="FireHub Icon"> Security
 
-This branch is intended **only for contributors and advanced testers**.
+For security reporting and guidelines, please refer to our [SECURITY.md](https://github.com/The-FireHub-Project/.github/blob/master/.github/SECURITY.md) file.
 
-## <img src="https://raw.githubusercontent.com/The-FireHub-Project/the-firehub-project.github.io/master/resources/graphics/icons/firehub.svg" width="15" alt="FireHub Icon"> Composer Usage (Not Recommended)
+## <img src="https://raw.githubusercontent.com/The-FireHub-Project/the-firehub-project.github.io/master/resources/graphics/icons/firehub.svg" width="15" alt="FireHub Icon"> Community
 
-For internal testing only:
+![GitHub watchers](https://img.shields.io/github/watchers/The-FireHub-Project/Container?style=social)
+![GitHub Repo stars](https://img.shields.io/github/stars/The-FireHub-Project/Container?style=social)
+![GitHub forks](https://img.shields.io/github/forks/The-FireHub-Project/Container?style=social)
 
-```json
-{
-  "require": {
-    "the-firehub-project/container": "dev-develop"
-  }
-}
-```
-⚠️ Never use dev-develop in production.
+- Be sure to review the [Code of Conduct](https://github.com/The-FireHub-Project/.github/blob/master/.github/CODE_OF_CONDUCT.md).
+- Read a [Contributing](https://github.com/The-FireHub-Project/.github/blob/master/.github/CONTRIBUTING.md) file to see how you can contribute to this project.
+- Read our [Security policy](https://github.com/The-FireHub-Project/.github/blob/master/.github/SECURITY.md) file to see how you can report a vulnerability.
+- Review the project [Governance model](https://github.com/The-FireHub-Project/.github/blob/master/.github/GOVERNANCE.md), including roles, decision-making, RFC process, and releases.
+
+## <img src="https://raw.githubusercontent.com/The-FireHub-Project/the-firehub-project.github.io/master/resources/graphics/icons/firehub.svg" width="15" alt="FireHub Icon"> Support
+
+<p>
+  <a href="https://github.com/The-FireHub-Project/Container/issues?q=is%3Aissue%20state%3Aopen">
+    <img
+      src="https://img.shields.io/github/issues/The-FireHub-Project/Container?style=flat&logo=github&logoColor=959da5&label=in%20progress%20issues&labelColor=31373e"
+      alt="GitHub in-progress issues"
+  /></a>
+  <a href="https://github.com/The-FireHub-Project/Container/issues?q=is%3Aissue">
+    <img
+      src="https://img.shields.io/github/issues-search?query=repo%3AThe-FireHub-Project%Foundaton&style=flat&logo=github&logoColor=959da5&label=total%20issues&labelColor=31373e"
+      alt="GitHub total issues"
+  /></a>
+  <a href="https://github.com/The-FireHub-Project/Container/issues?q=is%3Apr%20is%3Aopen">
+    <img
+      src="https://img.shields.io/github/issues-pr/The-FireHub-Project/Container?style=flat&logo=github&logoColor=959da5&labelColor=31373e"
+      alt="GitHub opened pull requests"
+  /></a>
+</p>
+
+For help with FireHub products, please refer to the following resources:
+
+- **General questions & discussions**: [GitHub Discussions](https://github.com/orgs/The-FireHub-Project/discussions)
+- **Bug reports & issues**: [Support](https://github.com/The-FireHub-Project/Container/issues)
+- **Documentation & guides**: [FireHub Docs](https://the-firehub-project.github.io)
+- **Commercial support** (Pro/Enterprise): contact your account manager
 
 ## <img src="https://raw.githubusercontent.com/The-FireHub-Project/the-firehub-project.github.io/master/resources/graphics/icons/firehub.svg" width="15" alt="FireHub Icon"> Authors and Contributors
 
