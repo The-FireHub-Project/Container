@@ -21,7 +21,7 @@ use FireHub\Container\Definition\ {
 use FireHub\Container\Internal\ {
     Autowirer, CandidateSelector, ConstructorMetadataCache, ContextualBindingRegistry, ContextualCandidateSelector,
     ContextualResolver, DependencyPlanCache, InstanceStore, ParameterBindingRegistry, ResolutionContext, ScopeState,
-    TypeMatcher
+    TagRegistry, TypeMatcher
 };
 use FireHub\Container\Exception\ {
     ScopeRequiredException, ServiceNotFoundException, ServiceTypeMismatchException, UnsupportedDefinitionException
@@ -78,6 +78,9 @@ final readonly class Resolver implements ResolverBoundary {
      * @param \FireHub\Container\Internal\ContextualBindingRegistry $contextual <p>
      * Contextual binding registry.
      * </p>
+     * @param \FireHub\Container\Internal\TagRegistry $tags <p>
+     * Service tag registry.
+     * </p>
      *
      * @return void
      */
@@ -85,7 +88,8 @@ final readonly class Resolver implements ResolverBoundary {
         private Registry $registry,
         private InstanceStore $singletons,
         ParameterBindingRegistry $parameters,
-        ContextualBindingRegistry $contextual
+        ContextualBindingRegistry $contextual,
+        private TagRegistry $tags
     ) {
 
         $this->metadata = new ConstructorMetadataCache;
@@ -198,6 +202,108 @@ final readonly class Resolver implements ResolverBoundary {
 
             return $this->resolve(
                 $id,
+                new ResolutionContext(
+                    scoped: $scoped,
+                    scope: $scope
+                )
+            );
+
+        } finally {
+
+            $scope->leave();
+
+        }
+
+    }
+
+    /**
+     * ### Resolves services associated with a tag
+     *
+     * Resolves all service identifiers registered under the specified tag in their original registration order.
+     *
+     * Each service is resolved through the active resolution context, preserving singleton, scoped, and transient
+     * lifetime semantics.
+     *
+     * An unknown tag produces an empty collection.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\TagRegistry::get() To retrieve tagged service identifiers.
+     * @uses \FireHub\Container\Resolver::resolve() To resolve each tagged service.
+     *
+     * @param non-empty-string $tag <p>
+     * Service tag name.
+     * </p>
+     * @param \FireHub\Container\Internal\ResolutionContext $context <p>
+     * Active dependency resolution context.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If a tagged service is no longer registered.
+     * @throws \FireHub\Container\Exception\ScopeRequiredException If a scoped service is resolved without a scope.
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service identifier is not registered.
+     * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the resolved service is not compatible
+     * with its registered identifier.
+     * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
+     * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
+     * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     *
+     * @return list<object> Resolved service instances.
+     */
+    public function tagged (string $tag, ResolutionContext $context):array {
+
+        $services = [];
+
+        foreach ($this->tags->get($tag) as $id)
+            $services[] = $this->resolve($id, $context);
+
+        return $services;
+
+    }
+
+    /**
+     * ### Resolves tagged services within a scope
+     *
+     * Resolves all services associated with a tag using the provided scoped instance store and lifecycle state.
+     *
+     * All tagged services share the same resolution context, preserving scoped instance caching and circular
+     * dependency detection.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\ScopeState::enter() To enter the scope.
+     * @uses \FireHub\Container\Internal\ScopeState::leave() To leave the scope.
+     * @uses \FireHub\Container\Resolver::tagged() To resolve tagged services.
+     *
+     * @param non-empty-string $tag <p>
+     * Service tag name.
+     * </p>
+     * @param \FireHub\Container\Internal\InstanceStore $scoped <p>
+     * Scoped instance storage.
+     * </p>
+     * @param \FireHub\Container\Internal\ScopeState $scope <p>
+     * Scope lifecycle state.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If a tagged service is no longer registered.
+     * @throws \FireHub\Container\Exception\ScopeRequiredException If a scoped service is resolved without a scope.
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service identifier is not registered.
+     * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the resolved service is not compatible
+     * with its registered identifier.
+     * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
+     * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
+     * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     *
+     * @return list<object> Resolved service instances.
+     */
+    public function taggedScoped (string $tag, InstanceStore $scoped, ScopeState $scope):array {
+
+        $scope->enter();
+
+        try {
+
+            return $this->tagged(
+                $tag,
                 new ResolutionContext(
                     scoped: $scoped,
                     scope: $scope
