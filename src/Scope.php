@@ -143,6 +143,59 @@ final readonly class Scope implements ScopeBoundary {
     }
 
     /**
+     * ### Invokes a callable within the current scope
+     *
+     * Executes the specified callable by combining explicitly supplied arguments with dependencies resolved from the
+     * current scope.
+     *
+     * Singleton services are shared with the parent container, scoped services are reused within this scope, and
+     * transient services are constructed for each resolution.
+     *
+     * The scope remains open after invocation and may be reused until explicitly closed.
+     *
+     * <code>
+     * $scope = $container->createScope();
+     *
+     * $scope->invoke(
+     *     static function (DatabaseConnection $connection):void {
+     *         $connection->connect();
+     *     }
+     * );
+     *
+     * $scope->close();
+     * </code>
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Resolver::invokeScoped() To execute the callable within the current scope.
+     *
+     * @param callable $callback <p>
+     * Callable to execute.
+     * </p>
+     * @param array<array-key, mixed> $arguments [optional] <p>
+     * Explicit positional and named arguments.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\InvalidMethodArgumentException If explicit arguments are invalid.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If a dependency cannot be resolved.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter cannot be resolved or the
+     * resolved dependency does not satisfy its declared type.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple dependency candidates are eligible.
+     * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
+     *
+     * @return mixed Value returned by the invoked callable.
+     */
+    public function invoke (callable $callback, array $arguments = []):mixed {
+
+        return $this->resolver->invokeScoped(
+            $callback,
+            $arguments,
+            $this->instances,
+            $this->state
+        );
+
+    }
+
+    /**
      * ### Resolves a registered service
      *
      * Resolves the requested service within the current scope.

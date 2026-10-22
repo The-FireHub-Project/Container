@@ -20,8 +20,8 @@ use FireHub\Container\Definition\ {
 };
 use FireHub\Container\Internal\ {
     Autowirer, CandidateSelector, ConstructorMetadataCache, ContextualBindingRegistry, ContextualCandidateSelector,
-    ContextualResolver, DependencyPlanCache, InstanceStore, ParameterBindingRegistry, ResolutionContext, ScopeState,
-    TagRegistry, TypeMatcher
+    ContextualResolver, DependencyPlanCache, InstanceStore, MethodInvoker, MethodPlanCache, ParameterBindingRegistry,
+    ParameterPlanCompiler, ParameterResolver, ResolutionContext, ScopeState, TagRegistry, TypeMatcher
 };
 use FireHub\Container\Exception\ {
     CircularDependencyException, ScopeRequiredException, ServiceNotFoundException, ServiceTypeMismatchException,
@@ -69,11 +69,22 @@ final readonly class Resolver implements ResolverBoundary {
     private Autowirer $autowirer;
 
     /**
+     * ### Reusable callable invoker
+     *
+     * Executes callable invocation plans using the shared dependency resolution infrastructure.
+     * @since 1.0.0
+     */
+    private MethodInvoker $invoker;
+
+    /**
      * ### Constructor
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Resolver::has() To check for service existence.
      * @uses \FireHub\Container\Resolver::get() To retrieve a service definition.
+     * @uses \FireHub\Container\Resolver::resolve() To resolve a service.
+     * @uses \FireHub\Container\Resolver::tagged() To retrieve tagged service definitions.
+     * @uses \FireHub\Container\Resolver::all() To retrieve all service definitions.
      * @uses \FireHub\Container\Registry::implementations() To get all registered implementations.
      *
      * @param \FireHub\Container\Registry $registry <p>
@@ -114,21 +125,34 @@ final readonly class Resolver implements ResolverBoundary {
             fn ():iterable => $this->registry->implementations()
         );
 
-        $plans = new DependencyPlanCache(
-            $this->metadata,
+        $compiler = new ParameterPlanCompiler(
             $this->matcher
         );
 
-        $this->autowirer = new Autowirer(
+        $plans = new DependencyPlanCache(
+            $this->metadata,
+            $compiler
+        );
+
+        $parameters_resolver = new ParameterResolver(
             fn (string $id, ResolutionContext $context):object => $this->resolve($id, $context),
             fn (string $tag, ResolutionContext $context):array => $this->tagged($tag, $context),
             fn (string $type, ResolutionContext $context):array => $this->all($type, $context),
             fn (string $id):bool => $this->has($id),
             $this->matcher,
             $selector,
-            $plans,
             $parameters,
             new ContextualCandidateSelector($contextual)
+        );
+
+        $this->autowirer = new Autowirer(
+            $plans,
+            $parameters_resolver
+        );
+
+        $this->invoker = new MethodInvoker(
+            new MethodPlanCache($compiler),
+            $parameters_resolver
         );
 
     }
@@ -458,6 +482,99 @@ final readonly class Resolver implements ResolverBoundary {
 
             return $this->tagged(
                 $tag,
+                new ResolutionContext(
+                    scoped: $scoped,
+                    scope: $scope
+                )
+            );
+
+        } finally {
+
+            $scope->leave();
+
+        }
+
+    }
+
+    /**
+     * ### Invokes a callable using dependency injection
+     *
+     * Executes the specified callable using explicit arguments and automatically resolved dependencies.
+     *
+     * Service dependencies are resolved using a root resolution context. Scoped services cannot be injected unless
+     * invocation is performed through an active scope.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\MethodInvoker::invoke() To execute the callable.
+     *
+     * @param callable $callback <p>
+     * Callable to execute using dependency injection.
+     * </p>
+     * @param array<array-key, mixed> $arguments [optional] <p>
+     * Explicit positional and named arguments.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\InvalidMethodArgumentException If explicit arguments are invalid.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If a dependency cannot be resolved.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter cannot be resolved or the
+     * resolved dependency does not satisfy its declared type.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple dependency candidates are eligible.
+     *
+     * @return mixed Value returned by the invoked callable.
+     */
+    public function invoke (callable $callback, array $arguments = []):mixed {
+
+        return $this->invoker->invoke(
+            $callback,
+            $arguments,
+            new ResolutionContext
+        );
+
+    }
+
+    /**
+     * ### Invokes a callable within a resolution scope
+     *
+     * Executes the specified callable using the provided scoped instance store and scope lifecycle state.
+     *
+     * Scoped dependencies are resolved and reused within the supplied scope. The scope remains open after invocation.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\ScopeState::enter() To enter the active scope.
+     * @uses \FireHub\Container\Internal\MethodInvoker::invoke() To execute the callable.
+     * @uses \FireHub\Container\Internal\ScopeState::leave() To leave the active scope.
+     *
+     * @param callable $callback <p>
+     * Callable to execute using scoped dependency injection.
+     * </p>
+     * @param array<array-key, mixed> $arguments <p>
+     * Explicit positional and named arguments.
+     * </p>
+     * @param \FireHub\Container\Internal\InstanceStore $scoped <p>
+     * Scoped service instance storage.
+     * </p>
+     * @param \FireHub\Container\Internal\ScopeState $scope <p>
+     * Active scope lifecycle state.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\InvalidMethodArgumentException If explicit arguments are invalid.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If a dependency cannot be resolved.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter cannot be resolved or the
+     * resolved dependency does not satisfy its declared type.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple dependency candidates are eligible.
+     * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
+     *
+     * @return mixed Value returned by the invoked callable.
+     */
+    public function invokeScoped (callable $callback, array $arguments, InstanceStore $scoped, ScopeState $scope):mixed {
+
+        $scope->enter();
+
+        try {
+
+            return $this->invoker->invoke(
+                $callback,
+                $arguments,
                 new ResolutionContext(
                     scoped: $scoped,
                     scope: $scope

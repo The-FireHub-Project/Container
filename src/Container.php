@@ -844,6 +844,54 @@ final class Container implements ContainerBoundary, Registrar {
     }
 
     /**
+     * ### Invokes a callable using dependency injection
+     *
+     * Executes the specified callable by combining explicitly supplied arguments with dependencies automatically
+     * resolved from the container.
+     *
+     * The callable may be a closure, named function, instance method, static method, or invokable object.
+     *
+     * Scoped dependencies require invocation through an active resolution scope.
+     *
+     * <code>
+     * $container->invoke(
+     *     static function (LoggerInterface $logger, string $message):void {
+     *         $logger->log($message);
+     *     },
+     *     [
+     *         'message' => 'Hello FireHub'
+     *     ]
+     * );
+     * </code>
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Resolver::invoke() To execute the callable using dependency injection.
+     *
+     * @param callable $callback <p>
+     * Callable to execute.
+     * </p>
+     * @param array<array-key, mixed> $arguments [optional] <p>
+     * Explicit positional and named arguments.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\InvalidMethodArgumentException If explicit arguments are invalid.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If a dependency cannot be resolved.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter cannot be resolved or the
+     * resolved dependency does not satisfy its declared type.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple dependency candidates are eligible.
+     *
+     * @return mixed Value returned by the invoked callable.
+     */
+    public function invoke (callable $callback, array $arguments = []):mixed {
+
+        return $this->resolver->invoke(
+            $callback,
+            $arguments
+        );
+
+    }
+
+    /**
      * ### Resolves a registered service
      *
      * Resolves the requested service using the configured service definitions.
