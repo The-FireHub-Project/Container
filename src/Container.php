@@ -1229,7 +1229,10 @@ final readonly class Container implements ContainerBoundary, Registrar {
      */
     public function validate ():Result {
 
-        return new Validator($this->registry)->validate();
+        return new Validator(
+            $this->registry,
+            $this->parameters
+        )->validate();
 
     }
 

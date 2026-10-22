@@ -14,11 +14,12 @@
 namespace FireHub\Container;
 
 use FireHub\Container\Validation\ {
-    Issue, IssueType, Result, Severity
+    DependencyGraph, Issue, IssueType, Result, Severity
 };
 use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance
 };
+use FireHub\Container\Internal\ParameterBindingRegistry;
 use FireHub\Runtime;
 use ReflectionClass, ReflectionException;
 
@@ -48,11 +49,15 @@ final readonly class Validator {
      * @param \FireHub\Container\Registry $registry <p>
      * Registry containing service definitions.
      * </p>
+     * @param \FireHub\Container\Internal\ParameterBindingRegistry $bindings <p>
+     * Explicit constructor parameter bindings.
+     * </p>
      *
      * @return void
      */
     public function __construct (
-        private Registry $registry
+        private Registry $registry,
+        private ParameterBindingRegistry $bindings
     ) {}
 
     /**
@@ -62,6 +67,13 @@ final readonly class Validator {
      *
      * Constructor dependencies and service lifetime relationships are not analyzed at this stage.
      * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Validation\DependencyGraph::validate() To validate dependency graphs.
+     * @uses \FireHub\Container\Registry::all() To retrieve all registered service definitions.
+     * @uses \FireHub\Container\Validator::validateClass() To validate class-based definitions.
+     * @uses \FireHub\Container\Validator::validateInstance() To validate existing instance definitions.
+     * @uses \FireHub\Container\Validator::validateAlias() To validate alias chains.
+     * @uses \FireHub\Runtime\Arr\Mutation::push() To append validation issues.
      *
      * @return \FireHub\Container\Validation\Result Validation result.
      */
@@ -96,6 +108,14 @@ final readonly class Validator {
 
         }
 
+        $dependency_issues = new DependencyGraph(
+            $this->registry,
+            $this->bindings
+        )->validate();
+
+        Runtime\Arr\Mutation::push($issues, ...$dependency_issues);
+
+        /** @var list<\FireHub\Container\Validation\Issue> $issues */
         return new Result($issues);
 
     }
@@ -216,6 +236,8 @@ final readonly class Validator {
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Validator::validateTypeCompatibility() To check type compatibility.
+     * @uses \FireHub\Container\Registry::find() To retrieve the target service definition.
+     * @uses \FireHub\Runtime\Str\SB\Delimiter::implode() To join path segments.
      *
      * @param class-string $id <p>
      * Alias service identifier.
@@ -243,7 +265,7 @@ final readonly class Validator {
                     IssueType::CIRCULAR_ALIAS,
                     Severity::ERROR,
                     $id,
-                    'Circular alias chain detected: ' . implode(' -> ', $path),
+                    'Circular alias chain detected: ' . Runtime\Str\SB\Delimiter::implode($path, ' -> '),
                     $path
                 );
 
