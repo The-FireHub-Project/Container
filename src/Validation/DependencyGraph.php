@@ -18,9 +18,10 @@ use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance
 };
 use FireHub\Container\Internal\ {
-    ConstructorMetadataCache, DependencyPlanCache, ParameterBindingRegistry,
-    ParameterPlanCompiler, TypeMatcher
+    ConstructorMetadataCache, ContextualBindingRegistry, ContextualCandidateSelector, DependencyPlanCache,
+    ParameterBindingRegistry, ParameterPlan, ParameterPlanCompiler, TypeMatcher
 };
+use FireHub\Container\Exception\AmbiguousDependencyException;
 use FireHub\Runtime;
 
 /**
@@ -55,6 +56,14 @@ final readonly class DependencyGraph {
     private TypeMatcher $matcher;
 
     /**
+     * ### Contextual dependency candidate selector
+     *
+     * Selects contextual dependency implementations using the same rules as runtime dependency resolution.
+     * @since 1.0.0
+     */
+    private ContextualCandidateSelector $contextual_selector;
+
+    /**
      * ### Constructor
      * @since 1.0.0
      *
@@ -64,12 +73,16 @@ final readonly class DependencyGraph {
      * @param \FireHub\Container\Internal\ParameterBindingRegistry $bindings <p>
      * Explicit constructor parameter bindings.
      * </p>
+     * @param \FireHub\Container\Internal\ContextualBindingRegistry $contextual <p>
+     * Contextual dependency binding registry.
+     * </p>
      *
      * @return void
      */
     public function __construct (
         private Registry $registry,
-        private ParameterBindingRegistry $bindings
+        private ParameterBindingRegistry $bindings,
+        ContextualBindingRegistry $contextual
     ) {
 
         $metadata = new ConstructorMetadataCache;
@@ -79,6 +92,10 @@ final readonly class DependencyGraph {
         $this->plans = new DependencyPlanCache(
             $metadata,
             new ParameterPlanCompiler($this->matcher)
+        );
+
+        $this->contextual_selector = new ContextualCandidateSelector(
+            $contextual
         );
 
     }
@@ -133,6 +150,8 @@ final readonly class DependencyGraph {
      * @uses \FireHub\Runtime\Arr\Inspection::inArray() To check if a service identifier is already in the path.
      * @uses \FireHub\Container\Registry::find() To retrieve a service definition.
      * @uses \FireHub\Container\Validation\DependencyGraph::inspect() To recursively validate child dependencies.
+     * @uses \FireHub\Container\Validation\DependencyGraph::selectContextualDependency() To select contextual dependencies.
+     * @uses \FireHub\Container\Validation\DependencyGraph::inspectContextualDependency() To validate contextual dependencies.
      * @uses \FireHub\Container\Internal\TypeMatcher::isConstructible() To check if a class is constructible.
      * @uses \FireHub\Container\Internal\DependencyPlanCache::get() To retrieve a compiled dependency plan.
      * @uses \FireHub\Container\Internal\ParameterBindingRegistry::has() To check if a parameter is explicitly bound.
@@ -206,6 +225,30 @@ final readonly class DependencyGraph {
             if ($parameter->tag !== null || $parameter->collection !== null)
                 continue;
 
+            [$ambiguous, $contextual] = $this->selectContextualDependency(
+                $class,
+                $parameter,
+                $path,
+                $issues
+            );
+
+            if ($ambiguous)
+                continue;
+
+            if ($contextual !== null) {
+
+                $this->inspectContextualDependency(
+                    $class,
+                    $contextual,
+                    $parameter,
+                    $path,
+                    $issues
+                );
+
+                continue;
+
+            }
+
             if ($parameter->composite !== null)
                 continue;
 
@@ -255,6 +298,227 @@ final readonly class DependencyGraph {
                 $path,
                 $issues
             );
+
+        }
+
+    }
+
+    /**
+     * ### Selects a contextual constructor dependency
+     *
+     * Evaluates contextual bindings for the specified consumer and compiled constructor parameter.
+     *
+     * Contextual candidate selection follows the same rules as runtime dependency resolution, including support for
+     * named, union, intersection, and disjunctive normal form dependency types.
+     *
+     * Ambiguous contextual bindings are reported as validation issues without interrupting the validation of other
+     * services.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\ContextualCandidateSelector::select() To select contextual dependencies.
+     *
+     * @param class-string $consumer <p>
+     * Concrete consumer implementation class.
+     * </p>
+     * @param \FireHub\Container\Internal\ParameterPlan $parameter <p>
+     * Compiled constructor parameter.
+     * </p>
+     * @param list<class-string> $path <p>
+     * Active dependency path.
+     * </p>
+     * @param list<\FireHub\Container\Validation\Issue> $issues <p>
+     * Collected validation issues.
+     * </p>
+     *
+     * @return array{0: bool, 1: null|class-string} Whether contextual selection was ambiguous and the selected
+     * dependency identifier, if available.
+     */
+    private function selectContextualDependency (string $consumer, ParameterPlan $parameter, array $path, array &$issues):array {
+
+        try {
+
+            return [
+                false,
+                $this->contextual_selector->select(
+                    $consumer,
+                    $parameter
+                )
+            ];
+
+        } catch (AmbiguousDependencyException) {
+
+            $name = $parameter->parameter->getName();
+
+            $issues[] = new Issue(
+                IssueType::AMBIGUOUS_DEPENDENCY,
+                Severity::ERROR,
+                $consumer,
+                "Multiple contextual implementations are eligible for parameter '$name' of '$consumer'.",
+                $path
+            );
+
+            return [true, null];
+
+        }
+
+    }
+
+    /**
+     * ### Inspects a contextually selected dependency
+     *
+     * Validates a contextual dependency target and continues dependency graph traversal when its implementation
+     * can be determined statically.
+     *
+     * Registered factory targets cannot be fully inspected without execution.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Registry::has() To check if a service is registered.
+     * @uses \FireHub\Container\Internal\TypeMatcher::isConstructible() To check if a class is constructible.
+     * @uses \FireHub\Container\Validation\DependencyGraph::inspect() To recursively validate child dependencies.
+     * @uses \FireHub\Container\Internal\CandidateSelector::matchesType() To check if a service implementation
+     * satisfies a dependency type.
+     * @uses \FireHub\Container\Registry::has() To check if a service is registered.
+     * @uses \FireHub\Container\Registry::implementations() To retrieve all registered service implementations.
+     * @uses \FireHub\Container\Validation\DependencyGraph::inspect() To recursively validate child dependencies.
+     * @uses \FireHub\Container\Validation\DependencyGraph::implementationOf() To find the statically known
+     * implementation.
+     *
+     * @param class-string $consumer <p>
+     * Consumer implementation class.
+     * </p>
+     * @param class-string $dependency <p>
+     * Selected contextual dependency identifier.
+     * </p>
+     * @param \FireHub\Container\Internal\ParameterPlan $parameter <p>
+     * Compiled constructor parameter.
+     * </p>
+     * @param list<class-string> $path <p>
+     * Active dependency path.
+     * </p>
+     * @param list<\FireHub\Container\Validation\Issue> $issues <p>
+     * Collected validation issues.
+     * </p>
+     *
+     * @return void
+     */
+    private function inspectContextualDependency (string $consumer, string $dependency, ParameterPlan $parameter, array $path, array &$issues):void {
+
+        if (
+            !$this->registry->has($dependency)
+            && !$this->matcher->isConstructible($dependency)
+        ) {
+
+            $issues[] = new Issue(
+                IssueType::MISSING_DEPENDENCY,
+                Severity::ERROR,
+                $consumer,
+                "Contextual dependency '$dependency' of '$consumer' is not registered or constructible.",
+                [...$path, $dependency]
+            );
+
+            return;
+
+        }
+
+        $implementation = $this->implementationOf($dependency);
+
+        if ($implementation !== null) {
+
+            $type = $parameter->parameter->getType();
+
+            if ($type !== null) {
+
+                $metadata = new ConstructorMetadataCache;
+
+                $matcher = new TypeMatcher($metadata);
+
+                $selector = new \FireHub\Container\Internal\CandidateSelector(
+                    $matcher,
+                    fn (string $id):bool => $this->registry->has($id),
+                    fn ():iterable => $this->registry->implementations()
+                );
+
+                if (!$selector->matchesType(
+                    $implementation,
+                    $parameter->parameter,
+                    $type
+                )) {
+
+                    $issues[] = new Issue(
+                        IssueType::INVALID_CONTEXTUAL_BINDING,
+                        Severity::ERROR,
+                        $consumer,
+                        "Contextual implementation '$implementation' does not satisfy parameter '{$parameter->parameter->getName()}' of '$consumer'.",
+                        [...$path, $dependency]
+                    );
+
+                    return;
+
+                }
+
+            }
+
+        }
+
+        $this->inspect(
+            $dependency,
+            $path,
+            $issues
+        );
+
+    }
+
+    /**
+     * ### Finds the statically known implementation of a service
+     *
+     * Follows registered alias chains and returns the concrete implementation class when it can be determined without
+     * resolving the service.
+     *
+     * Factory definitions are excluded because their runtime return types cannot be guaranteed statically.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Registry::find() To retrieve a service definition.
+     * @uses \FireHub\Container\Internal\TypeMatcher::isConstructible() To check if a class is constructible.
+     *
+     * @param class-string $id <p>
+     * Service identifier.
+     * </p>
+     *
+     * @return null|class-string Statically known implementation class, or null when unavailable.
+     */
+    private function implementationOf (string $id):?string {
+
+        $visited = [];
+
+        while (true) {
+
+            if (isset($visited[$id]))
+                return null;
+
+            $visited[$id] = true;
+
+            $definition = $this->registry->find($id);
+
+            if ($definition instanceof Alias) {
+
+                $id = $definition->target;
+
+                continue;
+
+            }
+
+            if ($definition instanceof Cls)
+                return $definition->class;
+
+            if ($definition instanceof Instance)
+                return $definition->instance::class;
+
+            if ($definition instanceof Factory)
+                return null;
+
+            return $this->matcher->isConstructible($id)
+                ? $id
+                : null;
 
         }
 

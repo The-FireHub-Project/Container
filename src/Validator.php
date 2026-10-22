@@ -19,7 +19,9 @@ use FireHub\Container\Validation\ {
 use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance
 };
-use FireHub\Container\Internal\ParameterBindingRegistry;
+use FireHub\Container\Internal\ {
+    ContextualBindingRegistry, ParameterBindingRegistry
+};
 use FireHub\Runtime;
 use ReflectionClass, ReflectionException;
 
@@ -52,12 +54,16 @@ final readonly class Validator {
      * @param \FireHub\Container\Internal\ParameterBindingRegistry $bindings <p>
      * Explicit constructor parameter bindings.
      * </p>
+     * @param \FireHub\Container\Internal\ContextualBindingRegistry $contextual <p>
+     * Contextual dependency binding registry.
+     * </p>
      *
      * @return void
      */
     public function __construct (
         private Registry $registry,
-        private ParameterBindingRegistry $bindings
+        private ParameterBindingRegistry $bindings,
+        private ContextualBindingRegistry $contextual
     ) {}
 
     /**
@@ -110,7 +116,8 @@ final readonly class Validator {
 
         $dependency_issues = new DependencyGraph(
             $this->registry,
-            $this->bindings
+            $this->bindings,
+            $this->contextual
         )->validate();
 
         Runtime\Arr\Mutation::push($issues, ...$dependency_issues);

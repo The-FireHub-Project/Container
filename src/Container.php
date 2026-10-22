@@ -1231,7 +1231,8 @@ final readonly class Container implements ContainerBoundary, Registrar {
 
         return new Validator(
             $this->registry,
-            $this->parameters
+            $this->parameters,
+            $this->contextual
         )->validate();
 
     }
