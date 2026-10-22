@@ -14,6 +14,10 @@
 namespace FireHub\Container\Internal;
 
 use FireHub\Core\Boundary\Lifecycle\Disposable;
+use FireHub\Container\Exception\ {
+    DisposalTrackerClosedException, ServiceDisposalException
+};
+use FireHub\Runtime;
 use Throwable;
 
 /**
@@ -67,22 +71,22 @@ final class DisposalTracker {
      * Registration is rejected after disposal has started.
      * @since 1.0.0
      *
+     * @uses \FireHub\Runtime\ObjectModel\Identity::id() To get the object identity.
+     *
      * @param \FireHub\Core\Boundary\Lifecycle\Disposable $instance <p>
      * Disposable instance to register.
      * </p>
      *
-     * @throws \LogicException If registration is attempted after disposal has started.
+     * @throws \FireHub\Container\Exception\DisposalTrackerClosedException If disposal has already started.
      *
      * @return void
      */
     public function track (Disposable $instance):void {
 
         if ($this->disposed)
-            throw new \LogicException(
-                'Cannot track disposable instances after disposal has started.'
-            );
+            throw new DisposalTrackerClosedException;
 
-        $id = spl_object_id($instance);
+        $id = Runtime\ObjectModel\Identity::id($instance);
 
         if (isset($this->identities[$id])) return;
 
@@ -102,9 +106,11 @@ final class DisposalTracker {
      * Repeated calls have no effect.
      * @since 1.0.0
      *
+     * @uses \FireHub\Runtime\Arr\Inspection::count() To get the number of instances.
+     *
      * @uses \FireHub\Core\Boundary\Lifecycle\Disposable::dispose() To release instance resources.
      *
-     * @throws Throwable If one or more instances fail during disposal.
+     * @throws \FireHub\Container\Exception\ServiceDisposalException If an instance fails to release its resources.
      *
      * @return void
      */
@@ -116,11 +122,11 @@ final class DisposalTracker {
 
         $failure = null;
 
-        for ($index = count($this->instances) - 1; $index >= 0; $index--) {
+        for ($index = Runtime\Arr\Inspection::count($this->instances) - 1; $index >= 0; $index--) {
 
             try {
 
-                $this->instances[$index]->dispose();
+                $this->instances[$index]->dispose(); // @phpstan-ignore offsetAccess.notFound
 
             } catch (Throwable $exception) {
 
@@ -134,7 +140,7 @@ final class DisposalTracker {
         $this->identities = [];
 
         if ($failure !== null)
-            throw $failure;
+            throw new ServiceDisposalException(previous: $failure);
 
     }
 
