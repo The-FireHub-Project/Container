@@ -23,8 +23,8 @@ use SplObjectStorage;
  *
  * Scopes are registered when created and removed when closed.
  *
- * Weak references prevent the registry from retaining scopes solely because they
- * were registered.
+ * The registry maintains strong references to registered scopes, ensuring that
+ * active scopes remain tracked until they are explicitly closed.
  *
  * The registry does not control the scope lifecycle or dispose of scoped services.
  * @since 1.0.0

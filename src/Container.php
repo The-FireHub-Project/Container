@@ -21,12 +21,11 @@ use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance
 };
 use FireHub\Container\Internal\ {
-    ContextualBindingRegistry, DisposalTracker, InstanceStore, ParameterBindingRegistry, ResolutionContext, ScopeRegistry,
-    TagRegistry
+    ContainerState, ContextualBindingRegistry, DisposalTracker, InstanceStore, ParameterBindingRegistry,
+    ResolutionContext, ScopeRegistry, TagRegistry
 };
 use FireHub\Container\Exception\ {
-    ContainerActiveScopesException, ContainerClosedException, ContainerFrozenException, InvalidTagNameException,
-    ServiceNotFoundException
+    ContainerActiveScopesException, InvalidTagNameException, ServiceNotFoundException
 };
 use FireHub\Runtime;
 use Closure;
@@ -47,67 +46,61 @@ use Closure;
  * resolution scope.
  * @since 1.0.0
  */
-final class Container implements ContainerBoundary, Registrar {
+final readonly class Container implements ContainerBoundary, Registrar {
 
     /**
      * ### Service registry
      * @since 1.0.0
      */
-    private readonly Registry $registry;
+    private Registry $registry;
 
     /**
      * ### Service resolver
      * @since 1.0.0
      */
-    private readonly Resolver $resolver;
+    private Resolver $resolver;
 
     /**
      * ### Constructor parameter binding registry
      * @since 1.0.0
      */
-    private readonly ParameterBindingRegistry $parameters;
+    private ParameterBindingRegistry $parameters;
 
     /**
      * ### Contextual dependency binding registry
      * @since 1.0.0
      */
-    private readonly ContextualBindingRegistry $contextual;
+    private ContextualBindingRegistry $contextual;
 
     /**
      * ### Singleton instance store
      * @since 1.0.0
      */
-    private readonly InstanceStore $singletons;
+    private InstanceStore $singletons;
 
     /**
      * ### Service tag registry
      * @since 1.0.0
      */
-    private readonly TagRegistry $tags;
+    private TagRegistry $tags;
 
     /**
      * ### Active scope registry
      * @since 1.0.0
      */
-    private readonly ScopeRegistry $scopes;
+    private ScopeRegistry $scopes;
 
     /**
      * ### Singleton disposable resource tracker
      * @since 1.0.0
      */
-    private readonly DisposalTracker $disposables;
+    private DisposalTracker $disposables;
 
     /**
-     * ### Container shutdown state
+     * ### Container lifecycle state
      * @since 1.0.0
      */
-    private bool $closed = false;
-
-    /**
-     * ### Container freeze state
-     * @var bool
-     */
-    private bool $frozen = false;
+    private ContainerState $state;
 
     /**
      * ### Constructor
@@ -124,6 +117,7 @@ final class Container implements ContainerBoundary, Registrar {
         $this->tags = new TagRegistry;
         $this->scopes = new ScopeRegistry;
         $this->disposables = new DisposalTracker;
+        $this->state = new ContainerState;
 
         $this->resolver = new Resolver(
             $this->registry,
@@ -131,7 +125,8 @@ final class Container implements ContainerBoundary, Registrar {
             $this->parameters,
             $this->contextual,
             $this->tags,
-            $this->disposables
+            $this->disposables,
+            $this->state
         );
 
     }
@@ -149,14 +144,14 @@ final class Container implements ContainerBoundary, Registrar {
      *
      * @since 1.0.0
      *
-     * @uses \FireHub\Container\Container::assertOpen() To ensure the container is open for resolution.
+     * @uses \FireHub\Container\Internal\ContainerState::assertOpen() To ensure the container is open for resolution.
      * @uses \FireHub\Container\Internal\ScopeRegistry::register() To register a new scope.
      *
      * @throws \FireHub\Container\Exception\ContainerClosedException If the container is closed.
      */
     public function createScope ():ScopeBoundary {
 
-        $this->assertOpen();
+        $this->state->assertOpen();
 
         $scope = new Scope(
             $this->resolver,
@@ -186,7 +181,7 @@ final class Container implements ContainerBoundary, Registrar {
      *
      * @since 1.0.0
      *
-     * @uses \FireHub\Container\Container::assertMutable() To check if the container is frozen.
+     * @uses \FireHub\Container\Internal\ContainerState::assertMutable() To check if the container is frozen.
      * @uses \FireHub\Container\Registry::register() To register a service definition.
      *
      * @template TService of object
@@ -206,7 +201,7 @@ final class Container implements ContainerBoundary, Registrar {
      */
     public function register (string $id, Definition $definition):self {
 
-        $this->assertMutable();
+        $this->state->assertMutable();
 
         $this->registry->register($id, $definition);
 
@@ -239,8 +234,8 @@ final class Container implements ContainerBoundary, Registrar {
      *
      * @since 1.0.0
      *
-     * @uses \FireHub\Container\Container::assertMutable()
-     * @uses \FireHub\Container\Internal\ContextualBindingRegistry::register()
+     * @uses \FireHub\Container\Internal\ContainerState::assertMutable() To check if the container is frozen.
+     * @uses \FireHub\Container\Internal\ContextualBindingRegistry::register() To register a contextual binding.
      *
      * @param class-string $consumer <p>
      * Consumer implementation class.
@@ -260,7 +255,7 @@ final class Container implements ContainerBoundary, Registrar {
      */
     public function bindContextual (string $consumer, string $dependency, string $implementation):self {
 
-        $this->assertMutable();
+        $this->state->assertMutable();
 
         $this->contextual->register(
             $consumer,
@@ -590,7 +585,8 @@ final class Container implements ContainerBoundary, Registrar {
      *
      * @since 1.0.0
      *
-     * @uses \FireHub\Container\Container::assertMutable() To ensure the container accepts configuration changes.
+     * @uses \FireHub\Container\Internal\ContainerState::assertMutable() To ensure the container accepts
+     * configuration changes.
      * @uses \FireHub\Container\Internal\ParameterBindingRegistry::register() To register parameter bindings.
      *
      * @param class-string $class <p>
@@ -607,7 +603,7 @@ final class Container implements ContainerBoundary, Registrar {
      */
     public function bindParameters (string $class, array $parameters):self {
 
-        $this->assertMutable();
+        $this->state->assertMutable();
 
         $this->parameters->register($class, $parameters);
 
@@ -637,7 +633,7 @@ final class Container implements ContainerBoundary, Registrar {
      *
      * @since 1.0.0
      *
-     * @uses \FireHub\Container\Container::assertOpen() To ensure the container is open for resolution.
+     * @uses \FireHub\Container\Internal\ContainerState::assertOpen() To ensure the container is open for resolution.
      * @uses \FireHub\Container\Resolver::all() To resolve matching services.
      *
      * @template TService of object
@@ -659,7 +655,7 @@ final class Container implements ContainerBoundary, Registrar {
      */
     public function all (string $type):array {
 
-        $this->assertOpen();
+        $this->state->assertOpen();
 
         return $this->resolver->all(
             $type,
@@ -722,7 +718,7 @@ final class Container implements ContainerBoundary, Registrar {
      *
      * @since 1.0.0
      *
-     * @uses \FireHub\Container\Container::assertMutable() To ensure the container is not frozen.
+     * @uses \FireHub\Container\Internal\ContainerState::assertMutable() To ensure the container is not frozen.
      * @uses \FireHub\Container\Container::has() To verify explicit service registrations.
      * @uses \FireHub\Container\Internal\TagRegistry::register() To register service tag associations.
      * @uses \FireHub\Runtime\Str\SB\Transform::trim() To validate tag names.
@@ -743,7 +739,7 @@ final class Container implements ContainerBoundary, Registrar {
      */
     public function tag (string $tag, string ...$services):self {
 
-        $this->assertMutable();
+        $this->state->assertMutable();
 
         if (Runtime\Str\SB\Transform::trim($tag) === '')
             throw new InvalidTagNameException;
@@ -834,7 +830,7 @@ final class Container implements ContainerBoundary, Registrar {
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Internal\TagRegistry::get() To retrieve tagged service identifiers.
-     * @uses \FireHub\Container\Container::assertOpen() To ensure the container is open for resolution.
+     * @uses \FireHub\Container\Internal\ContainerState::assertOpen() To ensure the container is open for resolution.
      *
      * @param non-empty-string $tag <p>
      * Tag name.
@@ -846,7 +842,7 @@ final class Container implements ContainerBoundary, Registrar {
      */
     public function taggedIds (string $tag):array {
 
-        $this->assertOpen();
+        $this->state->assertOpen();
 
         return $this->tags->get($tag);
 
@@ -881,7 +877,7 @@ final class Container implements ContainerBoundary, Registrar {
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Resolver::tagged() To resolve tagged services.
-     * @uses \FireHub\Container\Container::assertOpen() To ensure the container is open for resolution.
+     * @uses \FireHub\Container\Internal\ContainerState::assertOpen() To ensure the container is open for resolution.
      *
      * @param non-empty-string $tag <p>
      * Service tag name.
@@ -902,7 +898,7 @@ final class Container implements ContainerBoundary, Registrar {
      */
     public function tagged (string $tag):array {
 
-        $this->assertOpen();
+        $this->state->assertOpen();
 
         return $this->resolver->tagged(
             $tag,
@@ -939,7 +935,7 @@ final class Container implements ContainerBoundary, Registrar {
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Resolver::invoke() To execute the callable using dependency injection.
-     * @uses \FireHub\Container\Container::assertOpen() To ensure the container is open for resolution.
+     * @uses \FireHub\Container\Internal\ContainerState::assertOpen() To ensure the container is open for resolution.
      *
      * @param callable $callback <p>
      * Callable to execute.
@@ -958,7 +954,7 @@ final class Container implements ContainerBoundary, Registrar {
      */
     public function invoke (callable $callback, array $arguments = []):mixed {
 
-        $this->assertOpen();
+        $this->state->assertOpen();
 
         return $this->resolver->invoke(
             $callback,
@@ -989,7 +985,7 @@ final class Container implements ContainerBoundary, Registrar {
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Resolver::get() To resolve the service.
-     * @uses \FireHub\Container\Container::assertOpen() To ensure the container is open.
+     * @uses \FireHub\Container\Internal\ContainerState::assertOpen() To ensure the container is open.
      *
      * @template TService of object
      *
@@ -1011,7 +1007,7 @@ final class Container implements ContainerBoundary, Registrar {
      */
     public function get (string $id):object {
 
-        $this->assertOpen();
+        $this->state->assertOpen();
 
         return $this->resolver->get($id);
 
@@ -1038,7 +1034,7 @@ final class Container implements ContainerBoundary, Registrar {
      *
      * @since 1.0.0
      *
-     * @uses \FireHub\Container\Container::assertOpen() To ensure the container is open.
+     * @uses \FireHub\Container\Internal\ContainerState::assertOpen() To ensure the container is open.
      * @uses \FireHub\Container\Internal\ServiceRegistry::has() To check service registration.
      *
      * @param class-string $id <p>
@@ -1051,7 +1047,7 @@ final class Container implements ContainerBoundary, Registrar {
      */
     public function has (string $id):bool {
 
-        $this->assertOpen();
+        $this->state->assertOpen();
 
         return $this->registry->has($id);
 
@@ -1098,6 +1094,8 @@ final class Container implements ContainerBoundary, Registrar {
      * @uses \FireHub\Container\Internal\DisposalTracker::dispose() To release owned singleton resources.
      * @uses \FireHub\Container\Internal\DisposableRegistry::clear() To clear owned singleton instances.
      * @uses \FireHub\Container\Internal\ScopeRegistry::hasActive() To check for active scopes.
+     * @uses \FireHub\Container\Internal\ContainerState::close() To mark the container as closed.
+     * @uses \FireHub\Container\Internal\ContainerState::isClosed() To check if the container is closed.
      *
      * @throws \FireHub\Container\Exception\ServiceDisposalException If one or more services fail during disposal.
      * @throws \FireHub\Container\Exception\ContainerActiveScopesException If a scope is still active.
@@ -1106,12 +1104,12 @@ final class Container implements ContainerBoundary, Registrar {
      */
     public function close ():void {
 
-        if ($this->closed) return;
+        if ($this->state->isClosed()) return;
 
         if ($this->scopes->hasActive())
             throw new ContainerActiveScopesException;
 
-        $this->closed = true;
+        $this->state->close();
 
         try {
 
@@ -1139,11 +1137,13 @@ final class Container implements ContainerBoundary, Registrar {
      * </code>
      * @since 1.0.0
      *
+     * @uses \FireHub\Container\Internal\ContainerState::isClosed() To check if the container is closed.
+     *
      * @return bool True if the container has been shut down.
      */
     public function isClosed ():bool {
 
-        return $this->closed;
+        return $this->state->isClosed();
 
     }
 
@@ -1174,11 +1174,15 @@ final class Container implements ContainerBoundary, Registrar {
      *
      * @since 1.0.0
      *
+     * @uses \FireHub\Container\Internal\ContainerState::freeze() To mark the container as frozen.
+     *
+     * @throws \FireHub\Container\Exception\ContainerClosedException If the container is closed.
+     *
      * @return void
      */
     public function freeze ():void {
 
-        $this->frozen = true;
+        $this->state->freeze();
 
     }
 
@@ -1199,48 +1203,13 @@ final class Container implements ContainerBoundary, Registrar {
      *
      * @since 1.0.0
      *
+     * @uses \FireHub\Container\Internal\ContainerState::isFrozen() To check if the container is frozen.
+     *
      * @return bool True if frozen, false otherwise.
      */
     public function isFrozen ():bool {
 
-        return $this->frozen;
-
-    }
-
-    /**
-     * ### Ensures the container is open
-     *
-     * Prevents operations requiring an active container after shutdown.
-     * @since 1.0.0
-     *
-     * @throws \FireHub\Container\Exception\ContainerClosedException If the container is closed.
-     *
-     * @return void
-     */
-    private function assertOpen ():void {
-
-        if ($this->closed)
-            throw new ContainerClosedException;
-
-    }
-
-    /**
-     * ### Ensures the container accepts registrations
-     *
-     * Prevents modification of service definitions after the container has been frozen.
-     * @since 1.0.0
-     *
-     * @throws \FireHub\Container\Exception\ContainerFrozenException If the container is frozen.
-     * @throws \FireHub\Container\Exception\ContainerClosedException If the container is closed.
-     *
-     * @return void
-     */
-    private function assertMutable ():void {
-
-        $this->assertOpen();
-
-        if ($this->frozen)
-            throw new ContainerFrozenException;
+        return $this->state->isFrozen();
 
     }
 
