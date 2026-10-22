@@ -24,6 +24,11 @@ use FireHub\Core\Exception\Runtime\System\InvariantException;
  */
 final class ServiceTypeMismatchException extends InvariantException {
 
+    /**
+     * @inheritDoc
+     *
+     * @since 1.0.0
+     */
     protected const string DEFAULT_MESSAGE = 'Resolved service is not compatible with its registered identifier';
 
 }

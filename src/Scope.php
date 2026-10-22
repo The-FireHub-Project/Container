@@ -15,7 +15,7 @@ namespace FireHub\Container;
 
 use FireHub\Core\Boundary\Container\Scope as ScopeBoundary;
 use FireHub\Container\Internal\ {
-    InstanceStore, ScopeState
+    DisposalTracker, InstanceStore, ScopeRegistry, ScopeState
 };
 use Closure;
 
@@ -51,22 +51,34 @@ final readonly class Scope implements ScopeBoundary {
     private ScopeState $state;
 
     /**
+     * ### Scoped disposable resource tracker
+     * @since 1.0.0
+     */
+    private DisposalTracker $disposables;
+
+    /**
      * ### Constructor
      * @since 1.0.0
      *
      * @param \FireHub\Container\Resolver $resolver <p>
      * Parent container's service resolver.
      * </p>
+     * @param \FireHub\Container\Internal\ScopeRegistry $registry <p>
+     * Parent container's scope registry.
+     * </p>
      *
      * @return void
      */
     public function __construct (
-        private Resolver $resolver
+        private Resolver $resolver,
+        private ScopeRegistry $registry
     ) {
 
         $this->instances = new InstanceStore;
 
         $this->state = new ScopeState;
+
+        $this->disposables = new DisposalTracker;
 
     }
 
@@ -137,7 +149,75 @@ final readonly class Scope implements ScopeBoundary {
         return $this->resolver->taggedScoped(
             $tag,
             $this->instances,
-            $this->state
+            $this->state,
+            $this->disposables
+        );
+
+    }
+
+    /**
+     * ### Invokes a callable within the current scope
+     *
+     * Executes the specified callable by combining explicitly supplied arguments with dependencies resolved from the
+     * current scope.
+     *
+     * Singleton services are shared with the parent container, scoped services are reused within this scope, and
+     * transient services are constructed for each resolution.
+     *
+     * The scope remains open after invocation and may be reused until explicitly closed.
+     *
+     * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->scoped(DatabaseConnection::class);
+     *
+     * $scope = $container->createScope();
+     *
+     * try {
+     *
+     *     $service = new UserService;
+     *
+     *     $result = $scope->invoke(
+     *         [$service, 'create'],
+     *         ['username' => 'Danijel']
+     *     );
+     *
+     * } finally {
+     *
+     *     $scope->close();
+     *
+     * }
+     * </code>
+     *
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Resolver::invokeScoped() To execute the callable within the current scope.
+     *
+     * @param callable $callback <p>
+     * Callable to execute.
+     * </p>
+     * @param array<array-key, mixed> $arguments [optional] <p>
+     * Explicit positional and named arguments.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\InvalidMethodArgumentException If explicit arguments are invalid.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter cannot be resolved or the
+     * resolved dependency does not satisfy its declared type.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple dependency candidates are eligible.
+     * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
+     *
+     * @return mixed Value returned by the invoked callable.
+     */
+    public function invoke (callable $callback, array $arguments = []):mixed {
+
+        return $this->resolver->invokeScoped(
+            $callback,
+            $arguments,
+            $this->instances,
+            $this->state,
+            $this->disposables
         );
 
     }
@@ -195,7 +275,8 @@ final readonly class Scope implements ScopeBoundary {
         return $this->resolver->getScoped(
             $id,
             $this->instances,
-            $this->state
+            $this->state,
+            $this->disposables
         );
 
     }
@@ -296,7 +377,8 @@ final readonly class Scope implements ScopeBoundary {
         return $this->resolver->allScoped(
             $type,
             $this->instances,
-            $this->state
+            $this->state,
+            $this->disposables
         );
 
     }
@@ -347,7 +429,8 @@ final readonly class Scope implements ScopeBoundary {
      * </p>
      *
      * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
-     * @throws \FireHub\Container\Exception\ScopeActiveException If the scope is already executing.
+     * @throws \FireHub\Container\Exception\ScopeActiveException If service resolution is active.
+     * @throws \FireHub\Container\Exception\ServiceDisposalException If an instance fails to release its resources.
      *
      * @return TResult Callback result.
      */
@@ -407,12 +490,15 @@ final readonly class Scope implements ScopeBoundary {
     /**
      * ### Closes the scope
      *
-     * Releases all cached scoped service instances and prevents further service resolution through this scope.
+     * Prevents further service resolution and disposes of all owned scoped service instances.
+     *
+     * Disposable services are released in reverse registration order.
+     *
+     * The instance store is cleared even when resource disposal fails.
      *
      * Closing an already closed scope has no additional effect.
      *
-     * Closing a scope does not affect singleton instances maintained by the parent container or instances stored in
-     * other scopes.
+     * Singleton instances and resources owned by other scopes remain unaffected.
      *
      * <code>
      * use FireHub\Container\Container;
@@ -425,10 +511,8 @@ final readonly class Scope implements ScopeBoundary {
      *
      * $connection = $scope->get(DatabaseConnection::class);
      *
-     * // Release cached scoped instances.
      * $scope->close();
      *
-     * // The scope can no longer resolve services.
      * $scope->isClosed(); // true
      * </code>
      *
@@ -436,8 +520,11 @@ final readonly class Scope implements ScopeBoundary {
      *
      * @uses \FireHub\Container\Internal\ScopeState::close() To close the scope.
      * @uses \FireHub\Container\Internal\InstanceStore::clear() To clear the instance store.
+     * @uses \FireHub\Container\Internal\DisposalTracker::dispose() To dispose of disposable resources.
+     * @uses \FireHub\Container\Internal\ScopeRegistry::unregister() To unregister the scope from the registry.
      *
      * @throws \FireHub\Container\Exception\ScopeActiveException If service resolution is active.
+     * @throws \FireHub\Container\Exception\ServiceDisposalException If an instance fails to release its resources.
      *
      * @return void
      */
@@ -445,7 +532,23 @@ final readonly class Scope implements ScopeBoundary {
 
         $this->state->close();
 
-        $this->instances->clear();
+        try {
+
+            $this->disposables->dispose();
+
+        } finally {
+
+            try {
+
+                $this->instances->clear();
+
+            } finally {
+
+                $this->registry->unregister($this);
+
+            }
+
+        }
 
     }
 

@@ -21,6 +21,11 @@ use FireHub\Core\Exception\Runtime\System\InvariantException;
  */
 final class ContainerFrozenException extends InvariantException {
 
+    /**
+     * @inheritDoc
+     *
+     * @since 1.0.0
+     */
     protected const string DEFAULT_MESSAGE = 'Cannot register services in a frozen container';
 
 }

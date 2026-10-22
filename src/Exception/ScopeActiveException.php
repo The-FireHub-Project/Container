@@ -24,6 +24,11 @@ use FireHub\Core\Exception\RuntimeException;
  */
 final class ScopeActiveException extends RuntimeException {
 
+    /**
+     * @inheritDoc
+     *
+     * @since 1.0.0
+     */
     protected const string DEFAULT_MESSAGE = 'The dependency injection scope is currently active.';
 
 }

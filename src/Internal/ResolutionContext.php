@@ -41,13 +41,17 @@ final readonly class ResolutionContext {
      * @param null|\FireHub\Container\Internal\ScopeState $scope <p>
      * Associated scope lifecycle state.
      * </p>
+     * @param null|\FireHub\Container\Internal\DisposalTracker $disposables <p>
+     * Scoped disposable resource tracker.
+     * </p>
      *
      * @return void
      */
     public function __construct (
         public ResolutionStack $stack = new ResolutionStack,
         public ?InstanceStore $scoped = null,
-        public ?ScopeState $scope = null
+        public ?ScopeState $scope = null,
+        public ?DisposalTracker $disposables = null
     ) {}
 
     /**
@@ -61,7 +65,7 @@ final readonly class ResolutionContext {
      */
     public function root ():self {
 
-        if ($this->scoped === null)
+        if ($this->scoped === null && $this->disposables === null)
             return $this;
 
         return new self(

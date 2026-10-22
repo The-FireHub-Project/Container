@@ -23,6 +23,11 @@ use FireHub\Core\Exception\Runtime\System\InvariantException;
  */
 final class ServiceNotFoundException extends InvariantException {
 
+    /**
+     * @inheritDoc
+     *
+     * @since 1.0.0
+     */
     protected const string DEFAULT_MESSAGE = 'No service definition found for the specified identifier';
 
 }

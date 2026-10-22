@@ -14,14 +14,16 @@
 namespace FireHub\Container;
 
 use FireHub\Core\Boundary\Resolver as ResolverBoundary;
+use FireHub\Core\Boundary\Lifecycle\Disposable;
 use FireHub\Core\Meta\Enum\Container\Lifetime;
 use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance, Service
 };
 use FireHub\Container\Internal\ {
-    Autowirer, CandidateSelector, ConstructorMetadataCache, ContextualBindingRegistry, ContextualCandidateSelector,
-    ContextualResolver, DependencyPlanCache, InstanceStore, ParameterBindingRegistry, ResolutionContext, ScopeState,
-    TagRegistry, TypeMatcher
+    Autowirer, CandidateSelector, ConstructorMetadataCache, ContainerState, ContextualBindingRegistry,
+    ContextualCandidateSelector,  ContextualResolver, DependencyPlanCache, DisposalTracker, InstanceStore,
+    MethodInvoker, MethodPlanCache, ParameterBindingRegistry,  ParameterPlanCompiler, ParameterResolver,
+    ResolutionContext, ScopeState, TagRegistry, TypeMatcher
 };
 use FireHub\Container\Exception\ {
     CircularDependencyException, ScopeRequiredException, ServiceNotFoundException, ServiceTypeMismatchException,
@@ -69,11 +71,22 @@ final readonly class Resolver implements ResolverBoundary {
     private Autowirer $autowirer;
 
     /**
+     * ### Reusable callable invoker
+     *
+     * Executes callable invocation plans using the shared dependency resolution infrastructure.
+     * @since 1.0.0
+     */
+    private MethodInvoker $invoker;
+
+    /**
      * ### Constructor
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Resolver::has() To check for service existence.
      * @uses \FireHub\Container\Resolver::get() To retrieve a service definition.
+     * @uses \FireHub\Container\Resolver::resolve() To resolve a service.
+     * @uses \FireHub\Container\Resolver::tagged() To retrieve tagged service definitions.
+     * @uses \FireHub\Container\Resolver::all() To retrieve all service definitions.
      * @uses \FireHub\Container\Registry::implementations() To get all registered implementations.
      *
      * @param \FireHub\Container\Registry $registry <p>
@@ -91,6 +104,12 @@ final readonly class Resolver implements ResolverBoundary {
      * @param \FireHub\Container\Internal\TagRegistry $tags <p>
      * Service tag registry.
      * </p>
+     * @param \FireHub\Container\Internal\DisposalTracker $disposables <p>
+     * Disposable service tracker.
+     * </p>
+     * @param \FireHub\Container\Internal\ContainerState $state <p>
+     * Container state.
+     * </p>
      *
      * @return void
      */
@@ -99,7 +118,9 @@ final readonly class Resolver implements ResolverBoundary {
         private InstanceStore $singletons,
         ParameterBindingRegistry $parameters,
         ContextualBindingRegistry $contextual,
-        private TagRegistry $tags
+        private TagRegistry $tags,
+        private DisposalTracker $disposables,
+        private ContainerState $state
     ) {
 
         $this->metadata = new ConstructorMetadataCache;
@@ -114,21 +135,34 @@ final readonly class Resolver implements ResolverBoundary {
             fn ():iterable => $this->registry->implementations()
         );
 
-        $plans = new DependencyPlanCache(
-            $this->metadata,
+        $compiler = new ParameterPlanCompiler(
             $this->matcher
         );
 
-        $this->autowirer = new Autowirer(
+        $plans = new DependencyPlanCache(
+            $this->metadata,
+            $compiler
+        );
+
+        $parameters_resolver = new ParameterResolver(
             fn (string $id, ResolutionContext $context):object => $this->resolve($id, $context),
             fn (string $tag, ResolutionContext $context):array => $this->tagged($tag, $context),
             fn (string $type, ResolutionContext $context):array => $this->all($type, $context),
             fn (string $id):bool => $this->has($id),
             $this->matcher,
             $selector,
-            $plans,
             $parameters,
             new ContextualCandidateSelector($contextual)
+        );
+
+        $this->autowirer = new Autowirer(
+            $plans,
+            $parameters_resolver
+        );
+
+        $this->invoker = new MethodInvoker(
+            new MethodPlanCache($compiler),
+            $parameters_resolver
         );
 
     }
@@ -139,15 +173,20 @@ final readonly class Resolver implements ResolverBoundary {
      * Checks whether a service identifier exists without constructing or resolving its instance.
      * @since 1.0.0
      *
+     * @uses \FireHub\Container\Internal\ContainerState::assertOpen() To ensure the container is open.
      * @uses \FireHub\Container\Registry::has() To check for service existence.
      *
      * @param class-string $id <p>
      * Service identifier.
      * </p>
      *
+     * @throws \FireHub\Container\Exception\ContainerClosedException If the container is closed.
+     *
      * @return bool True if the service is registered.
      */
     public function has (string $id):bool {
+
+        $this->state->assertOpen();
 
         return $this->registry->has($id);
 
@@ -161,6 +200,7 @@ final readonly class Resolver implements ResolverBoundary {
      * Aliases are followed until their underlying service definition is reached.
      * @since 1.0.0
      *
+     * @uses \FireHub\Container\Internal\ContainerState::assertOpen() To ensure the container is open.
      * @uses \FireHub\Container\Resolver::resolve() To resolve a service.
      * @uses \FireHub\Container\Internal\InstanceStore::get() To retrieve a previously resolved instance.
      *
@@ -178,10 +218,13 @@ final readonly class Resolver implements ResolverBoundary {
      * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
      * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
      * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     * @throws \FireHub\Container\Exception\ContainerClosedException If the container is closed.
      *
      * @return TService Resolved service instance.
      */
     public function get (string $id):object {
+
+        $this->state->assertOpen();
 
         $instance = $this->singletons->get($id);
 
@@ -215,6 +258,9 @@ final readonly class Resolver implements ResolverBoundary {
      * @param \FireHub\Container\Internal\ScopeState $scope <p>
      * Scope lifecycle state.
      * </p>
+     * @param \FireHub\Container\Internal\DisposalTracker $disposables <p>
+     * Disposable service tracker.
+     * </>
      *
      * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service identifier is not registered.
      * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the resolved service is not compatible with its registered identifier.
@@ -223,10 +269,11 @@ final readonly class Resolver implements ResolverBoundary {
      * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
      * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
      * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     * @throws \FireHub\Container\Exception\ContainerClosedException If the container is closed.
      *
      * @return TService Resolved service.
      */
-    public function getScoped (string $id, InstanceStore $scoped, ScopeState $scope):object {
+    public function getScoped (string $id, InstanceStore $scoped, ScopeState $scope, DisposalTracker $disposables):object {
 
         $scope->enter();
 
@@ -236,7 +283,8 @@ final readonly class Resolver implements ResolverBoundary {
                 $id,
                 new ResolutionContext(
                     scoped: $scoped,
-                    scope: $scope
+                    scope: $scope,
+                    disposables: $disposables
                 )
             );
 
@@ -259,6 +307,7 @@ final readonly class Resolver implements ResolverBoundary {
      * Service aliases are resolved to their underlying targets and do not produce duplicate collection entries.
      * @since 1.0.0
      *
+     * @uses \FireHub\Container\Internal\ContainerState::assertOpen() To ensure the container is open.
      * @uses \FireHub\Container\Registry::all() To retrieve all registered service identifiers.
      * @uses \FireHub\Container\Resolver::canonicalId() To resolve service aliases.
      * @uses \FireHub\Container\Resolver::matchesCollectionType() To check whether a service matches the specified type.
@@ -279,10 +328,13 @@ final readonly class Resolver implements ResolverBoundary {
      * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
      * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
      * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     * @throws \FireHub\Container\Exception\ContainerClosedException If the container is closed.
      *
      * @return list<TService> Matching service instances.
      */
     public function all (string $type, ResolutionContext $context):array {
+
+        $this->state->assertOpen();
 
         $services = []; $resolved = [];
         foreach ($this->registry->all() as $id => $definition) {
@@ -336,6 +388,9 @@ final readonly class Resolver implements ResolverBoundary {
      * @param \FireHub\Container\Internal\ScopeState $scope <p>
      * Scope state.
      * </p>
+     * @param \FireHub\Container\Internal\DisposalTracker $disposables <p>
+     * Disposable service tracker.
+     * </>
      *
      * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service identifier is not registered.
      * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the resolved service is not compatible
@@ -345,10 +400,11 @@ final readonly class Resolver implements ResolverBoundary {
      * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
      * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
      * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
+     * @throws \FireHub\Container\Exception\ContainerClosedException If the container is closed.
      *
      * @return list<TService> Matching service instances.
      */
-    public function allScoped (string $type, InstanceStore $scoped, ScopeState $scope):array {
+    public function allScoped (string $type, InstanceStore $scoped, ScopeState $scope, DisposalTracker $disposables):array {
 
         $scope->enter();
 
@@ -358,7 +414,8 @@ final readonly class Resolver implements ResolverBoundary {
                 $type,
                 new ResolutionContext(
                     scoped: $scoped,
-                    scope: $scope
+                    scope: $scope,
+                    disposables: $disposables
                 )
             );
 
@@ -381,6 +438,7 @@ final readonly class Resolver implements ResolverBoundary {
      * An unknown tag produces an empty collection.
      * @since 1.0.0
      *
+     * @uses \FireHub\Container\Internal\ContainerState::assertOpen() To ensure the container is open.
      * @uses \FireHub\Container\Internal\TagRegistry::get() To retrieve tagged service identifiers.
      * @uses \FireHub\Container\Resolver::resolve() To resolve each tagged service.
      *
@@ -400,10 +458,13 @@ final readonly class Resolver implements ResolverBoundary {
      * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
      * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
      * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     * @throws \FireHub\Container\Exception\ContainerClosedException If the container is closed.
      *
      * @return list<object> Resolved service instances.
      */
     public function tagged (string $tag, ResolutionContext $context):array {
+
+        $this->state->assertOpen();
 
         $services = [];
 
@@ -436,6 +497,9 @@ final readonly class Resolver implements ResolverBoundary {
      * @param \FireHub\Container\Internal\ScopeState $scope <p>
      * Scope lifecycle state.
      * </p>
+     * @param \FireHub\Container\Internal\DisposalTracker $disposables <p>
+     * Disposable service tracker.
+     * </>
      *
      * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
      * @throws \FireHub\Container\Exception\ServiceNotFoundException If a tagged service is no longer registered.
@@ -447,10 +511,11 @@ final readonly class Resolver implements ResolverBoundary {
      * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
      * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
      * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     * @throws \FireHub\Container\Exception\ContainerClosedException If the container is closed.
      *
      * @return list<object> Resolved service instances.
      */
-    public function taggedScoped (string $tag, InstanceStore $scoped, ScopeState $scope):array {
+    public function taggedScoped (string $tag, InstanceStore $scoped, ScopeState $scope, DisposalTracker $disposables):array {
 
         $scope->enter();
 
@@ -460,7 +525,108 @@ final readonly class Resolver implements ResolverBoundary {
                 $tag,
                 new ResolutionContext(
                     scoped: $scoped,
-                    scope: $scope
+                    scope: $scope,
+                    disposables: $disposables
+                )
+            );
+
+        } finally {
+
+            $scope->leave();
+
+        }
+
+    }
+
+    /**
+     * ### Invokes a callable using dependency injection
+     *
+     * Executes the specified callable using explicit arguments and automatically resolved dependencies.
+     *
+     * Service dependencies are resolved using a root resolution context. Scoped services cannot be injected unless
+     * invocation is performed through an active scope.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\ContainerState::assertOpen() To ensure the container is open.
+     * @uses \FireHub\Container\Internal\MethodInvoker::invoke() To execute the callable.
+     *
+     * @param callable $callback <p>
+     * Callable to execute using dependency injection.
+     * </p>
+     * @param array<array-key, mixed> $arguments [optional] <p>
+     * Explicit positional and named arguments.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\InvalidMethodArgumentException If explicit arguments are invalid.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter cannot be resolved or the
+     * resolved dependency does not satisfy its declared type.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple dependency candidates are eligible.
+     * @throws \FireHub\Container\Exception\ContainerClosedException If the container is closed.
+     *
+     * @return mixed Value returned by the invoked callable.
+     */
+    public function invoke (callable $callback, array $arguments = []):mixed {
+
+        $this->state->assertOpen();
+
+        return $this->invoker->invoke(
+            $callback,
+            $arguments,
+            new ResolutionContext
+        );
+
+    }
+
+    /**
+     * ### Invokes a callable within a resolution scope
+     *
+     * Executes the specified callable using the provided scoped instance store and scope lifecycle state.
+     *
+     * Scoped dependencies are resolved and reused within the supplied scope. The scope remains open after invocation.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\ScopeState::enter() To enter the active scope.
+     * @uses \FireHub\Container\Internal\MethodInvoker::invoke() To execute the callable.
+     * @uses \FireHub\Container\Internal\ScopeState::leave() To leave the active scope.
+     *
+     * @param callable $callback <p>
+     * Callable to execute using scoped dependency injection.
+     * </p>
+     * @param array<array-key, mixed> $arguments <p>
+     * Explicit positional and named arguments.
+     * </p>
+     * @param \FireHub\Container\Internal\InstanceStore $scoped <p>
+     * Scoped service instance storage.
+     * </p>
+     * @param \FireHub\Container\Internal\ScopeState $scope <p>
+     * Active scope lifecycle state.
+     * </p>
+     * @param \FireHub\Container\Internal\DisposalTracker $disposables <p>
+     * Disposable service tracker.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\InvalidMethodArgumentException If explicit arguments are invalid.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter cannot be resolved or the
+     * resolved dependency does not satisfy its declared type.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple dependency candidates are eligible.
+     * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
+     *
+     * @return mixed Value returned by the invoked callable.
+     */
+    public function invokeScoped (callable $callback, array $arguments, InstanceStore $scoped, ScopeState $scope, DisposalTracker $disposables)
+    :mixed {
+
+        $scope->enter();
+
+        try {
+
+            return $this->invoker->invoke(
+                $callback,
+                $arguments,
+                new ResolutionContext(
+                    scoped: $scoped,
+                    scope: $scope,
+                    disposables: $disposables
                 )
             );
 
@@ -476,6 +642,7 @@ final readonly class Resolver implements ResolverBoundary {
      * ### Resolves a service within the specified context
      * @since 1.0.0
      *
+     * @uses \FireHub\Container\Internal\ContainerState::assertOpen() To ensure the container is open.
      * @uses \FireHub\Container\Registry::find() To retrieve a service definition.
      * @uses \FireHub\Container\Internal\ResolutionStack::enter() To mark the service as being currently being resolved.
      * @uses \FireHub\Container\Internal\ResolutionStack::leave() To remove the service from the resolution stack.
@@ -498,10 +665,13 @@ final readonly class Resolver implements ResolverBoundary {
      * @throws \FireHub\Container\Exception\ScopeRequiredException If the service requires a scope but none is provided.
      * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
      * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     * @throws \FireHub\Container\Exception\ContainerClosedException If the container is closed.
      *
      * @return TService Resolved service.
      */
     private function resolve (string $id, ResolutionContext $context):object {
+
+        $this->state->assertOpen();
 
         $definition = $this->registry->find($id);
 
@@ -551,6 +721,7 @@ final readonly class Resolver implements ResolverBoundary {
      * @uses \FireHub\Container\Internal\ResolutionStack::enter() To mark the service as being currently being resolved.
      * @uses \FireHub\Container\Internal\ResolutionStack::leave() To remove the service from the resolution stack.
      * @uses \FireHub\Container\Resolver::create() To construct a service instance.
+     * @uses \FireHub\Container\Internal\DisposalTracker::track() To track a disposable service.
      *
      * @template TService of object
      *
@@ -581,7 +752,6 @@ final readonly class Resolver implements ResolverBoundary {
             Lifetime::SCOPED => $context->scoped
                 ?? throw new ScopeRequiredException,
             Lifetime::TRANSIENT => null
-
         };
 
         if ($store !== null) {
@@ -602,6 +772,19 @@ final readonly class Resolver implements ResolverBoundary {
 
             if (!$instance instanceof $id)
                 throw new ServiceTypeMismatchException;
+
+            if (
+                $instance instanceof Disposable
+                && !$definition instanceof Instance
+            ) {
+
+                match ($lifetime) {
+                    Lifetime::SINGLETON => $this->disposables->track($instance),
+                    Lifetime::SCOPED => $context->disposables?->track($instance),
+                    Lifetime::TRANSIENT => null
+                };
+
+            }
 
             $store?->set($id, $instance);
 
@@ -823,11 +1006,16 @@ final readonly class Resolver implements ResolverBoundary {
      * Service definition.
      * </p>
      *
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the implementation class is not
+     * instantiable or a required constructor dependency cannot be resolved.
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If a required dependency is not registered.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple dependency candidates are
+     * eligible.
+     * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
+     * @throws \FireHub\Container\Exception\ScopeRequiredException If a dependency requires an active scope.
+     * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If a resolved dependency does not satisfy
+     * its registered service type.
      * @throws \FireHub\Container\Exception\UnsupportedDefinitionException If the service definition is not supported.
-     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter is not optional and cannot
-     * be resolved.
-     * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service is not registered.
-     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
      *
      * @return object Created service instance.
      */
@@ -862,10 +1050,15 @@ final readonly class Resolver implements ResolverBoundary {
      * Active resolution context.
      * </p>
      *
-     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter is not optional and cannot
-     * be resolved.
-     * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service is not registered.
-     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the implementation class is not
+     * instantiable or a required constructor dependency cannot be resolved.
+     * @throws \FireHub\Container\Exception\ServiceNotFoundException If a required dependency is not registered.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple dependency candidates are
+     * eligible.
+     * @throws \FireHub\Container\Exception\CircularDependencyException If a circular dependency is detected.
+     * @throws \FireHub\Container\Exception\ScopeRequiredException If a dependency requires an active scope.
+     * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If a resolved dependency does not satisfy
+     * its registered service type.
      *
      * @return object Constructed service instance.
      */

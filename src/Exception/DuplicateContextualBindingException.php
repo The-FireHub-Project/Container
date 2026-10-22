@@ -24,6 +24,11 @@ use FireHub\Core\Exception\Runtime\System\InvariantException;
  */
 final class DuplicateContextualBindingException extends InvariantException {
 
+    /**
+     * @inheritDoc
+     *
+     * @since 1.0.0
+     */
     protected const string DEFAULT_MESSAGE = 'A contextual binding for the specified consumer and dependency is already registered';
 
 }
