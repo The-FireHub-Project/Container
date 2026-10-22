@@ -34,6 +34,9 @@ use PHPUnit\Framework\Attributes\ {
 #[CoversClass(Container::class)]
 final class ParameterBindingTest extends FireHubTestCase {
 
+    /**
+     * @since 1.0.0
+     */
     use ExceptionAssertions;
 
     /**

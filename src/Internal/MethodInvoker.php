@@ -76,7 +76,6 @@ final readonly class MethodInvoker {
      * </p>
      *
      * @throws \FireHub\Container\Exception\InvalidMethodArgumentException If explicit arguments are invalid.
-     * @throws \FireHub\Container\Exception\ServiceInstantiationException If a dependency cannot be resolved.
      * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter cannot be resolved or the
      * resolved dependency does not satisfy its declared type.
      * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple dependency candidates are eligible.

@@ -154,16 +154,30 @@ final readonly class Scope implements ScopeBoundary {
      * The scope remains open after invocation and may be reused until explicitly closed.
      *
      * <code>
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->scoped(DatabaseConnection::class);
+     *
      * $scope = $container->createScope();
      *
-     * $scope->invoke(
-     *     static function (DatabaseConnection $connection):void {
-     *         $connection->connect();
-     *     }
-     * );
+     * try {
      *
-     * $scope->close();
+     *     $service = new UserService;
+     *
+     *     $result = $scope->invoke(
+     *         [$service, 'create'],
+     *         ['username' => 'Danijel']
+     *     );
+     *
+     * } finally {
+     *
+     *     $scope->close();
+     *
+     * }
      * </code>
+     *
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Resolver::invokeScoped() To execute the callable within the current scope.
@@ -176,7 +190,6 @@ final readonly class Scope implements ScopeBoundary {
      * </p>
      *
      * @throws \FireHub\Container\Exception\InvalidMethodArgumentException If explicit arguments are invalid.
-     * @throws \FireHub\Container\Exception\ServiceInstantiationException If a dependency cannot be resolved.
      * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter cannot be resolved or the
      * resolved dependency does not satisfy its declared type.
      * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple dependency candidates are eligible.

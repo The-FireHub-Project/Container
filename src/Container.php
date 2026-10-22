@@ -854,15 +854,20 @@ final class Container implements ContainerBoundary, Registrar {
      * Scoped dependencies require invocation through an active resolution scope.
      *
      * <code>
-     * $container->invoke(
-     *     static function (LoggerInterface $logger, string $message):void {
-     *         $logger->log($message);
-     *     },
-     *     [
-     *         'message' => 'Hello FireHub'
-     *     ]
+     * use FireHub\Container\Container;
+     *
+     * $container = new Container;
+     *
+     * $container->singleton(LoggerInterface::class, FileLogger::class);
+     *
+     * $service = new UserService;
+     *
+     * $result = $container->invoke(
+     *     [$service, 'create'],
+     *     ['username' => 'Danijel']
      * );
      * </code>
+     *
      * @since 1.0.0
      *
      * @uses \FireHub\Container\Resolver::invoke() To execute the callable using dependency injection.
@@ -875,7 +880,6 @@ final class Container implements ContainerBoundary, Registrar {
      * </p>
      *
      * @throws \FireHub\Container\Exception\InvalidMethodArgumentException If explicit arguments are invalid.
-     * @throws \FireHub\Container\Exception\ServiceInstantiationException If a dependency cannot be resolved.
      * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter cannot be resolved or the
      * resolved dependency does not satisfy its declared type.
      * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple dependency candidates are eligible.
