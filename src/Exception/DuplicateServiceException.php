@@ -24,6 +24,11 @@ use FireHub\Core\Exception\Runtime\System\InvariantException;
  */
 final class DuplicateServiceException extends InvariantException {
 
+    /**
+     * @inheritDoc
+     *
+     * @since 1.0.0
+     */
     protected const string DEFAULT_MESSAGE = 'A service with the specified identifier is already registered';
 
 }

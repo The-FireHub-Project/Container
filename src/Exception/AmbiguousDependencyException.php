@@ -24,6 +24,11 @@ use FireHub\Core\Exception\RuntimeException;
  */
 final class AmbiguousDependencyException extends RuntimeException {
 
+    /**
+     * @inheritDoc
+     *
+     * @since 1.0.0
+     */
     protected const string DEFAULT_MESSAGE = 'Multiple services match the requested dependency.';
 
 }

@@ -24,7 +24,8 @@ use FireHub\Core\Exception\Runtime\System\InvariantException;
 final class InvalidTagNameException extends InvariantException {
 
     /**
-     * ### Default exception message
+     * @inheritDoc
+     *
      * @since 1.0.0
      */
     protected const string DEFAULT_MESSAGE = 'Service tag name must not be empty or contain only whitespace';
