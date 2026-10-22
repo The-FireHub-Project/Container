@@ -773,8 +773,6 @@ final readonly class Resolver implements ResolverBoundary {
             if (!$instance instanceof $id)
                 throw new ServiceTypeMismatchException;
 
-            $store?->set($id, $instance);
-
             if (
                 $instance instanceof Disposable
                 && !$definition instanceof Instance
@@ -787,6 +785,8 @@ final readonly class Resolver implements ResolverBoundary {
                 };
 
             }
+
+            $store?->set($id, $instance);
 
             return $instance;
 
