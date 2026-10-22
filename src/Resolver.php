@@ -14,14 +14,16 @@
 namespace FireHub\Container;
 
 use FireHub\Core\Boundary\Resolver as ResolverBoundary;
+use FireHub\Core\Boundary\Lifecycle\Disposable;
 use FireHub\Core\Meta\Enum\Container\Lifetime;
 use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance, Service
 };
 use FireHub\Container\Internal\ {
     Autowirer, CandidateSelector, ConstructorMetadataCache, ContextualBindingRegistry, ContextualCandidateSelector,
-    ContextualResolver, DependencyPlanCache, InstanceStore, MethodInvoker, MethodPlanCache, ParameterBindingRegistry,
-    ParameterPlanCompiler, ParameterResolver, ResolutionContext, ScopeState, TagRegistry, TypeMatcher
+    ContextualResolver, DependencyPlanCache, DisposalTracker, InstanceStore, MethodInvoker, MethodPlanCache,
+    ParameterBindingRegistry,  ParameterPlanCompiler, ParameterResolver, ResolutionContext, ScopeState, TagRegistry,
+    TypeMatcher
 };
 use FireHub\Container\Exception\ {
     CircularDependencyException, ScopeRequiredException, ServiceNotFoundException, ServiceTypeMismatchException,
@@ -102,6 +104,9 @@ final readonly class Resolver implements ResolverBoundary {
      * @param \FireHub\Container\Internal\TagRegistry $tags <p>
      * Service tag registry.
      * </p>
+     * @param \FireHub\Container\Internal\DisposalTracker $disposables <p>
+     * Disposable service tracker.
+     * </p>
      *
      * @return void
      */
@@ -110,7 +115,8 @@ final readonly class Resolver implements ResolverBoundary {
         private InstanceStore $singletons,
         ParameterBindingRegistry $parameters,
         ContextualBindingRegistry $contextual,
-        private TagRegistry $tags
+        private TagRegistry $tags,
+        private DisposalTracker $disposables
     ) {
 
         $this->metadata = new ConstructorMetadataCache;
@@ -239,6 +245,9 @@ final readonly class Resolver implements ResolverBoundary {
      * @param \FireHub\Container\Internal\ScopeState $scope <p>
      * Scope lifecycle state.
      * </p>
+     * @param \FireHub\Container\Internal\DisposalTracker $disposables <p>
+     * Disposable service tracker.
+     * </>
      *
      * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service identifier is not registered.
      * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the resolved service is not compatible with its registered identifier.
@@ -250,7 +259,7 @@ final readonly class Resolver implements ResolverBoundary {
      *
      * @return TService Resolved service.
      */
-    public function getScoped (string $id, InstanceStore $scoped, ScopeState $scope):object {
+    public function getScoped (string $id, InstanceStore $scoped, ScopeState $scope, DisposalTracker $disposables):object {
 
         $scope->enter();
 
@@ -260,7 +269,8 @@ final readonly class Resolver implements ResolverBoundary {
                 $id,
                 new ResolutionContext(
                     scoped: $scoped,
-                    scope: $scope
+                    scope: $scope,
+                    disposables: $disposables
                 )
             );
 
@@ -360,6 +370,9 @@ final readonly class Resolver implements ResolverBoundary {
      * @param \FireHub\Container\Internal\ScopeState $scope <p>
      * Scope state.
      * </p>
+     * @param \FireHub\Container\Internal\DisposalTracker $disposables <p>
+     * Disposable service tracker.
+     * </>
      *
      * @throws \FireHub\Container\Exception\ServiceNotFoundException If the service identifier is not registered.
      * @throws \FireHub\Container\Exception\ServiceTypeMismatchException If the resolved service is not compatible
@@ -372,7 +385,7 @@ final readonly class Resolver implements ResolverBoundary {
      *
      * @return list<TService> Matching service instances.
      */
-    public function allScoped (string $type, InstanceStore $scoped, ScopeState $scope):array {
+    public function allScoped (string $type, InstanceStore $scoped, ScopeState $scope, DisposalTracker $disposables):array {
 
         $scope->enter();
 
@@ -382,7 +395,8 @@ final readonly class Resolver implements ResolverBoundary {
                 $type,
                 new ResolutionContext(
                     scoped: $scoped,
-                    scope: $scope
+                    scope: $scope,
+                    disposables: $disposables
                 )
             );
 
@@ -460,6 +474,9 @@ final readonly class Resolver implements ResolverBoundary {
      * @param \FireHub\Container\Internal\ScopeState $scope <p>
      * Scope lifecycle state.
      * </p>
+     * @param \FireHub\Container\Internal\DisposalTracker $disposables <p>
+     * Disposable service tracker.
+     * </>
      *
      * @throws \FireHub\Container\Exception\ScopeClosedException If the scope is closed.
      * @throws \FireHub\Container\Exception\ServiceNotFoundException If a tagged service is no longer registered.
@@ -474,7 +491,7 @@ final readonly class Resolver implements ResolverBoundary {
      *
      * @return list<object> Resolved service instances.
      */
-    public function taggedScoped (string $tag, InstanceStore $scoped, ScopeState $scope):array {
+    public function taggedScoped (string $tag, InstanceStore $scoped, ScopeState $scope, DisposalTracker $disposables):array {
 
         $scope->enter();
 
@@ -484,7 +501,8 @@ final readonly class Resolver implements ResolverBoundary {
                 $tag,
                 new ResolutionContext(
                     scoped: $scoped,
-                    scope: $scope
+                    scope: $scope,
+                    disposables: $disposables
                 )
             );
 
@@ -555,6 +573,9 @@ final readonly class Resolver implements ResolverBoundary {
      * @param \FireHub\Container\Internal\ScopeState $scope <p>
      * Active scope lifecycle state.
      * </p>
+     * @param \FireHub\Container\Internal\DisposalTracker $disposables <p>
+     * Disposable service tracker.
+     * </p>
      *
      * @throws \FireHub\Container\Exception\InvalidMethodArgumentException If explicit arguments are invalid.
      * @throws \FireHub\Container\Exception\ServiceInstantiationException If the parameter cannot be resolved or the
@@ -564,7 +585,8 @@ final readonly class Resolver implements ResolverBoundary {
      *
      * @return mixed Value returned by the invoked callable.
      */
-    public function invokeScoped (callable $callback, array $arguments, InstanceStore $scoped, ScopeState $scope):mixed {
+    public function invokeScoped (callable $callback, array $arguments, InstanceStore $scoped, ScopeState $scope, DisposalTracker $disposables)
+    :mixed {
 
         $scope->enter();
 
@@ -575,7 +597,8 @@ final readonly class Resolver implements ResolverBoundary {
                 $arguments,
                 new ResolutionContext(
                     scoped: $scoped,
-                    scope: $scope
+                    scope: $scope,
+                    disposables: $disposables
                 )
             );
 
@@ -666,6 +689,7 @@ final readonly class Resolver implements ResolverBoundary {
      * @uses \FireHub\Container\Internal\ResolutionStack::enter() To mark the service as being currently being resolved.
      * @uses \FireHub\Container\Internal\ResolutionStack::leave() To remove the service from the resolution stack.
      * @uses \FireHub\Container\Resolver::create() To construct a service instance.
+     * @uses \FireHub\Container\Internal\DisposalTracker::track() To track a disposable service.
      *
      * @template TService of object
      *
@@ -696,7 +720,6 @@ final readonly class Resolver implements ResolverBoundary {
             Lifetime::SCOPED => $context->scoped
                 ?? throw new ScopeRequiredException,
             Lifetime::TRANSIENT => null
-
         };
 
         if ($store !== null) {
@@ -719,6 +742,19 @@ final readonly class Resolver implements ResolverBoundary {
                 throw new ServiceTypeMismatchException;
 
             $store?->set($id, $instance);
+
+            if (
+                $instance instanceof Disposable
+                && !$definition instanceof Instance
+            ) {
+
+                match ($lifetime) {
+                    Lifetime::SINGLETON => $this->disposables->track($instance),
+                    Lifetime::SCOPED => $context->disposables?->track($instance),
+                    Lifetime::TRANSIENT => null
+                };
+
+            }
 
             return $instance;
 
