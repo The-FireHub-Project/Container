@@ -20,8 +20,8 @@ use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance
 };
 use FireHub\Container\Internal\ {
-    ConstructorMetadataCache, ContextualBindingRegistry, DependencyPlanCache, ParameterBindingRegistry,
-    ParameterPlanCompiler, TagRegistry, TypeMatcher
+    CanonicalIdCache, ConstructorMetadataCache, ContextualBindingRegistry, DependencyPlanCache,
+    ParameterBindingRegistry, ParameterPlanCompiler, TagRegistry, TypeMatcher
 };
 use FireHub\Runtime;
 use ReflectionClass, ReflectionException;
@@ -136,13 +136,18 @@ final readonly class Validator {
 
         }
 
+        $canonical = new CanonicalIdCache(
+            $this->registry
+        );
+
         $dependency_issues = new DependencyGraph(
             $this->registry,
             $this->bindings,
             $this->contextual,
             $this->tags,
             $plans,
-            $matcher
+            $matcher,
+            $canonical
         )->validate();
 
         Runtime\Arr\Mutation::push($issues, ...$dependency_issues);
@@ -168,7 +173,8 @@ final readonly class Validator {
             $this->contextual,
             $this->tags,
             $plans,
-            $matcher
+            $matcher,
+            $canonical
         )->validate();
 
         Runtime\Arr\Mutation::push($issues, ...$lifetime_issues);

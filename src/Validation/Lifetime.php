@@ -16,11 +16,11 @@ namespace FireHub\Container\Validation;
 use FireHub\Core\Meta\Enum\Container\Lifetime as LifetimeService;
 use FireHub\Container\Registry;
 use FireHub\Container\Definition\ {
-    Alias, Cls, Factory, Instance
+    Cls, Factory, Instance
 };
 use FireHub\Container\Internal\ {
-    CandidateSelector, ConstructorMetadataCache, ContextualBindingRegistry, ContextualCandidateSelector,
-    DependencyPlanCache, ParameterBindingRegistry, ParameterPlan, ParameterPlanCompiler, TagRegistry, TypeMatcher
+    CandidateSelector, CanonicalIdCache, ContextualBindingRegistry, ContextualCandidateSelector, DependencyPlanCache,
+    ParameterBindingRegistry, ParameterPlan, TagRegistry, TypeMatcher
 };
 use FireHub\Container\Exception\ {
     AmbiguousDependencyException, ServiceInstantiationException
@@ -93,6 +93,9 @@ final readonly class Lifetime {
      * @param \FireHub\Container\Internal\TypeMatcher $matcher <p>
      * Dependency type matcher.
      * </p>
+     * @param \FireHub\Container\Internal\CanonicalIdCache $canonical <p>
+     * Canonical service identifier cache.
+     * </p>
      *
      * @return void
      */
@@ -102,7 +105,8 @@ final readonly class Lifetime {
         ContextualBindingRegistry $contextual,
         private TagRegistry $tags,
         DependencyPlanCache $plans,
-        TypeMatcher $matcher
+        TypeMatcher $matcher,
+        private CanonicalIdCache $canonical
     ) {
 
         $this->plans = $plans;
@@ -351,16 +355,10 @@ final readonly class Lifetime {
     }
 
     /**
-     * ### Resolves the canonical service identifier
-     *
-     * Follows registered alias chains without resolving service instances.
-     *
-     * Invalid or circular aliases are ignored because they are reported by the existing service definition
-     * validator.
+     * ### Resolves a canonical service identifier
      * @since 1.0.0
      *
-     * @uses \FireHub\Container\Registry::find() To retrieve a service definition.
-     * @uses \FireHub\Container\Registry::has() To check if an alias target exists.
+     * @uses \FireHub\Container\Internal\Canonical::get() To retrieve the canonical identifier.
      *
      * @param class-string $id <p>
      * Service identifier.
@@ -370,25 +368,7 @@ final readonly class Lifetime {
      */
     private function canonicalId (string $id):?string {
 
-        $visited = [];
-
-        while (true) {
-
-            if (isset($visited[$id])) return null;
-
-            $visited[$id] = true;
-
-            $definition = $this->registry->find($id);
-
-            if (!$definition instanceof Alias)
-                return $id;
-
-            $id = $definition->target;
-
-            if (!$this->registry->has($id))
-                return null;
-
-        }
+        return $this->canonical->get($id);
 
     }
 

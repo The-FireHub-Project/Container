@@ -18,8 +18,8 @@ use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance
 };
 use FireHub\Container\Internal\ {
-    CandidateSelector, ContextualBindingRegistry, ContextualCandidateSelector, DependencyPlan, DependencyPlanCache,
-    ParameterBindingRegistry, ParameterPlan, TagRegistry, TypeMatcher
+    CandidateSelector, CanonicalIdCache, ContextualBindingRegistry, ContextualCandidateSelector, DependencyPlan,
+    DependencyPlanCache, ParameterBindingRegistry, ParameterPlan, TagRegistry, TypeMatcher
 };
 use FireHub\Container\Exception\ {
     AmbiguousDependencyException, ServiceInstantiationException
@@ -99,6 +99,9 @@ final readonly class DependencyGraph {
      * @param \FireHub\Container\Internal\TypeMatcher $matcher <p>
      * Dependency type matcher.
      * </p>
+     * @param \FireHub\Container\Internal\CanonicalIdCache $canonical <p>
+     * Canonical service identifier cache.
+     * </p>
      *
      * @return void
      */
@@ -108,7 +111,8 @@ final readonly class DependencyGraph {
         ContextualBindingRegistry $contextual,
         private TagRegistry $tags,
         DependencyPlanCache $plans,
-        TypeMatcher $matcher
+        TypeMatcher $matcher,
+        private CanonicalIdCache $canonical
     ) {
 
         $this->plans = $plans;
@@ -589,43 +593,19 @@ final readonly class DependencyGraph {
 
     /**
      * ### Resolves a canonical service identifier
-     *
-     * Follows registered service aliases without constructing services.
-     *
-     * Invalid and circular alias chains are ignored because they are validated separately by the main validator.
      * @since 1.0.0
      *
-     * @uses \FireHub\Container\Registry::find() To retrieve service definitions.
-     * @uses \FireHub\Container\Registry::has() To check whether an alias target exists.
+     * @uses \FireHub\Container\Internal\Canonical::get() To retrieve the canonical identifier.
      *
      * @param class-string $id <p>
      * Service identifier.
      * </p>
      *
-     * @return null|class-string Canonical service identifier, or null when the alias chain is invalid.
+     * @return null|class-string Canonical service identifier.
      */
     private function canonicalId (string $id):?string {
 
-        $visited = [];
-
-        while (true) {
-
-            if (isset($visited[$id]))
-                return null;
-
-            $visited[$id] = true;
-
-            $definition = $this->registry->find($id);
-
-            if (!$definition instanceof Alias)
-                return $id;
-
-            if (!$this->registry->has($definition->target))
-                return null;
-
-            $id = $definition->target;
-
-        }
+        return $this->canonical->get($id);
 
     }
 
