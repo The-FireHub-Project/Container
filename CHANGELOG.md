@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Planned
+
+* Shared dependency graph compilation and analysis.
+* Unified dependency candidate selection for static validation.
+* Additional validation performance optimizations.
+
+## [[v0.4.0](https://github.com/The-FireHub-Project/Container/compare/v0.3.0...v0.4.0)] – 2026-10-23
+
+### Added
+* Comprehensive static container validation through `Container::validate()` by @dieselxxx
+* Structured validation results with issue types, severity levels, and dependency paths by @dieselxxx
+* Constructor dependency graph validation, including missing dependencies and circular references by @dieselxxx
+* Static validation of union, intersection, and disjunctive normal form (DNF) dependencies by @dieselxxx
+* Tagged service and collection injection validation by @dieselxxx
+* Explicit constructor parameter binding validation by @dieselxxx
+* Contextual binding validation, including implementation compatibility and unused bindings by @dieselxxx
+* Singleton-to-scoped lifetime mismatch detection for direct and transitive dependencies by @dieselxxx
+* Lifetime validation supports for contextual, composite, tagged, collection, and aliased dependencies by @dieselxxx
+* Runtime lifetime protection regression tests by @dieselxxx
+* Shared constructor metadata, dependency plan, and type-matching caches across validation stages by @dieselxxx
+* Canonical service identifier caching for alias resolution by @dieselxxx
+* Expanded PHPUnit coverage for dependency validation and service lifetime behavior by @dieselxxx
+
+### Changed
+* Consolidated constructor metadata analysis across validation components by @dieselxxx
+* Reduced redundant reflection and dependency plan compilation during validation by @dieselxxx
+* Improved consistency between static dependency analysis and runtime dependency resolution by @dieselxxx
+* Optimized alias resolution through shared caching within individual validation operations by @dieselxxx
+
 ## [[v0.3.0](https://github.com/The-FireHub-Project/Container/compare/v0.2.0...v0.3.0)] – 2026-10-22
 
 ### Added
