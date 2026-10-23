@@ -99,4 +99,18 @@ final class ParameterBindingRegistry {
 
     }
 
+    /**
+     * ### Gets all registered constructor parameter bindings
+     *
+     * Returns parameter bindings grouped by their implementation classes without modifying the registry.
+     * @since 1.0.0
+     *
+     * @return array<class-string, array<non-empty-string, mixed>> Registered parameter bindings.
+     */
+    public function all ():array {
+
+        return $this->bindings;
+
+    }
+
 }

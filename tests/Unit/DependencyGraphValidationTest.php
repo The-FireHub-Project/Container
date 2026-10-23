@@ -25,8 +25,10 @@ use FireHub\Tests\Container\Stubs\ {
     ContextualCircularB, ContextualFileLogger, ContextualLogger, DnfCacheService, DnfDefaultConsumer, DnfFileLogger,
     DnfFirstBranchConsumer, DnfNestedConsumer, DnfNoCandidateConsumer, DnfRequiredNullableConsumer,
     DnfSecondBranchConsumer, DnfSerializableCache, DnfTwoIntersectionsConsumer, DnfUniversalService,
-    IntersectionConsumer, Logger, LoggerInterface, TaggedCircularConsumer, TaggedValidationConsumer, TestFileLogger,
-    TestLogger, UnionA, UnionAmbiguous, UnionB, UnionNullable, UnionOnlyA, ValidationConstructionProbe
+    IntersectionConsumer, Logger, LoggerInterface, ParameterBindingValidationComposite,
+    ParameterBindingValidationContract, ParameterBindingValidationService, TaggedCircularConsumer,
+    TaggedValidationConsumer, TestFileLogger, TestLogger, UnionA, UnionAmbiguous, UnionB, UnionNullable, UnionOnlyA,
+    ValidationConstructionProbe
 };
 use PHPUnit\Framework\Attributes\ {
     CoversClass, Group, Small
@@ -1341,6 +1343,433 @@ final class DependencyGraphValidationTest extends FireHubTestCase {
         $result = $container->validate();
 
         self::assertTrue($result->isValid());
+
+    }
+
+    /**
+     * ### Validates compatible scalar parameter bindings
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testValidScalarParameterBindings ():void {
+
+        $container = new Container;
+
+        $container->singleton(ParameterBindingValidationService::class);
+
+        $container->bindParameters(
+            ParameterBindingValidationService::class,
+            [
+                'port' => 3307,
+                'host' => 'localhost',
+                'timeout' => 2.5
+            ]
+        );
+
+        self::assertTrue($container->validate()->isValid());
+
+    }
+
+    /**
+     * ### Detects incompatible scalar parameter bindings
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testInvalidScalarParameterBinding ():void {
+
+        $container = new Container;
+
+        $container->singleton(ParameterBindingValidationService::class);
+
+        $container->bindParameters(
+            ParameterBindingValidationService::class,
+            ['port' => 'invalid']
+        );
+
+        $result = $container->validate();
+
+        self::assertFalse($result->isValid());
+
+        self::assertCount(
+            1,
+            $this->issuesOfType($result, IssueType::INVALID_PARAMETER_BINDING)
+        );
+
+    }
+
+    /**
+     * ### Accepts integer values for float parameters
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testIntegerToFloatParameterBinding ():void {
+
+        $container = new Container;
+
+        $container->singleton(ParameterBindingValidationService::class);
+
+        $container->bindParameters(
+            ParameterBindingValidationService::class,
+            ['timeout' => 5]
+        );
+
+        self::assertTrue($container->validate()->isValid());
+
+    }
+
+    /**
+     * ### Accepts null for nullable parameter bindings
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testNullableParameterBinding ():void {
+
+        $container = new Container;
+
+        $container->singleton(ParameterBindingValidationService::class);
+
+        $container->bindParameters(
+            ParameterBindingValidationService::class,
+            ['host' => null]
+        );
+
+        self::assertTrue($container->validate()->isValid());
+
+    }
+
+    /**
+     * ### Rejects null for non-nullable parameter bindings
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testInvalidNullableParameterBinding ():void {
+
+        $container = new Container;
+
+        $container->singleton(ParameterBindingValidationService::class);
+
+        $container->bindParameters(
+            ParameterBindingValidationService::class,
+            ['port' => null]
+        );
+
+        $result = $container->validate();
+
+        self::assertFalse($result->isValid());
+
+        self::assertCount(
+            1,
+            $this->issuesOfType($result, IssueType::INVALID_PARAMETER_BINDING)
+        );
+
+    }
+
+    /**
+     * ### Validates compatible object parameter bindings
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testValidObjectParameterBinding ():void {
+
+        $container = new Container;
+
+        $container->singleton(ParameterBindingValidationService::class);
+
+        $container->bindParameters(
+            ParameterBindingValidationService::class,
+            ['dependency' => new ParameterBindingValidationService]
+        );
+
+        self::assertTrue($container->validate()->isValid());
+
+    }
+
+    /**
+     * ### Detects incompatible object parameter bindings
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testInvalidObjectParameterBinding ():void {
+
+        $container = new Container;
+
+        $container->singleton(ParameterBindingValidationService::class);
+
+        $container->bindParameters(
+            ParameterBindingValidationService::class,
+            ['dependency' => new \stdClass]
+        );
+
+        $result = $container->validate();
+
+        self::assertFalse($result->isValid());
+
+        self::assertCount(
+            1,
+            $this->issuesOfType($result, IssueType::INVALID_PARAMETER_BINDING)
+        );
+
+    }
+
+    /**
+     * ### Validates compatible union parameter bindings
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testValidUnionParameterBinding ():void {
+
+        $container = new Container;
+
+        $container->bindParameters(
+            ParameterBindingValidationComposite::class,
+            ['union' => 'value']
+        );
+
+        self::assertSame(
+            [],
+            $this->issuesOfType(
+                $container->validate(),
+                IssueType::INVALID_PARAMETER_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Detects incompatible union parameter bindings
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testInvalidUnionParameterBinding ():void {
+
+        $container = new Container;
+
+        $container->bindParameters(
+            ParameterBindingValidationComposite::class,
+            ['union' => new \stdClass]
+        );
+
+        $result = $container->validate();
+
+        self::assertCount(
+            1,
+            $this->issuesOfType($result, IssueType::INVALID_PARAMETER_BINDING)
+        );
+
+    }
+
+    /**
+     * ### Validates compatible intersection parameter bindings
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testValidIntersectionParameterBinding ():void {
+
+        $container = new Container;
+
+        $container->bindParameters(
+            ParameterBindingValidationComposite::class,
+            ['intersection' => new \ArrayObject]
+        );
+
+        self::assertSame(
+            [],
+            $this->issuesOfType(
+                $container->validate(),
+                IssueType::INVALID_PARAMETER_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Detects incompatible intersection parameter bindings
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testInvalidIntersectionParameterBinding ():void {
+
+        $container = new Container;
+
+        $container->bindParameters(
+            ParameterBindingValidationComposite::class,
+            ['intersection' => new \stdClass]
+        );
+
+        self::assertCount(
+            1,
+            $this->issuesOfType(
+                $container->validate(),
+                IssueType::INVALID_PARAMETER_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Validates compatible DNF parameter bindings
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testValidDnfParameterBinding ():void {
+
+        $container = new Container;
+
+        $container->bindParameters(
+            ParameterBindingValidationComposite::class,
+            ['dnf' => new \ArrayObject]
+        );
+
+        self::assertSame(
+            [],
+            $this->issuesOfType(
+                $container->validate(),
+                IssueType::INVALID_PARAMETER_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Detects incompatible DNF parameter bindings
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testInvalidDnfParameterBinding ():void {
+
+        $container = new Container;
+
+        $container->bindParameters(
+            ParameterBindingValidationComposite::class,
+            ['dnf' => new \stdClass]
+        );
+
+        self::assertCount(
+            1,
+            $this->issuesOfType(
+                $container->validate(),
+                IssueType::INVALID_PARAMETER_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Detects bindings for nonexistent constructor parameters
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testNonexistentParameterBinding ():void {
+
+        $container = new Container;
+
+        $container->bindParameters(
+            ParameterBindingValidationService::class,
+            ['unknown' => 'value']
+        );
+
+        self::assertCount(
+            1,
+            $this->issuesOfType(
+                $container->validate(),
+                IssueType::INVALID_PARAMETER_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Validates explicit bindings before constructor defaults
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testInvalidBindingOverridesDefault ():void {
+
+        $container = new Container;
+
+        $container->singleton(ParameterBindingValidationService::class);
+
+        $container->bindParameters(
+            ParameterBindingValidationService::class,
+            ['port' => 'invalid']
+        );
+
+        self::assertCount(
+            1,
+            $this->issuesOfType(
+                $container->validate(),
+                IssueType::INVALID_PARAMETER_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Detects parameter bindings for unknown implementation classes
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testUnknownParameterBindingClass ():void {
+
+        $container = new Container;
+
+        $container->bindParameters(
+            'FireHub\\Tests\\Container\\Stubs\\NonexistentBindingClass',
+            ['value' => 1]
+        );
+
+        self::assertCount(
+            1,
+            $this->issuesOfType(
+                $container->validate(),
+                IssueType::INVALID_PARAMETER_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Collects multiple invalid parameter bindings
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testMultipleInvalidParameterBindings ():void {
+
+        $container = new Container;
+
+        $container->bindParameters(
+            ParameterBindingValidationService::class,
+            [
+                'port' => 'invalid',
+                'host' => new \stdClass,
+                'timeout' => false
+            ]
+        );
+
+        self::assertCount(
+            3,
+            $this->issuesOfType(
+                $container->validate(),
+                IssueType::INVALID_PARAMETER_BINDING
+            )
+        );
 
     }
 
