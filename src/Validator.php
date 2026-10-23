@@ -131,13 +131,19 @@ final readonly class Validator {
 
         Runtime\Arr\Mutation::push($issues, ...$dependency_issues);
 
-        $binding_issues = new ContextualBinding(
+        $parameter_issues = new ParameterBinding(
+            $this->bindings
+        )->validate();
+
+        Runtime\Arr\Mutation::push($issues, ...$parameter_issues);
+
+        $contextual_issues = new ContextualBinding(
             $this->registry,
             $this->contextual,
             $this->bindings
         )->validate();
 
-        Runtime\Arr\Mutation::push($issues, ...$binding_issues);
+        Runtime\Arr\Mutation::push($issues, ...$contextual_issues);
 
         /** @var list<\FireHub\Container\Validation\Issue> $issues */
         return new Result($issues);
