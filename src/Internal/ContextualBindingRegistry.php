@@ -110,4 +110,20 @@ final class ContextualBindingRegistry {
 
     }
 
+    /**
+     * ### Gets all registered contextual dependency bindings
+     *
+     * Returns contextual bindings grouped by their consumer implementation classes.
+     *
+     * The returned collection preserves the registration order and does not modify the registry.
+     * @since 1.0.0
+     *
+     * @return array<class-string, array<class-string, class-string>> Registered contextual dependency bindings.
+     */
+    public function all ():array {
+
+        return $this->bindings;
+
+    }
+
 }

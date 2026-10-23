@@ -24,6 +24,7 @@ use FireHub\Container\Internal\ {
     ContainerState, ContextualBindingRegistry, DisposalTracker, InstanceStore, ParameterBindingRegistry,
     ResolutionContext, ScopeRegistry, TagRegistry
 };
+use FireHub\Container\Validation\Result;
 use FireHub\Container\Exception\ {
     ContainerActiveScopesException, InvalidTagNameException, ServiceNotFoundException
 };
@@ -1210,6 +1211,35 @@ final readonly class Container implements ContainerBoundary, Registrar {
     public function isFrozen ():bool {
 
         return $this->state->isFrozen();
+
+    }
+
+    /**
+     * ### Validates registered service definitions
+     *
+     * Performs static validation of the container configuration without instantiating services or executing factory
+     * callbacks.
+     *
+     * Validation does not freeze or modify the container.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Validation::validate() To validate registered service definitions.
+     *
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If a constructor parameter contains invalid
+     * injection attributes or unsupported dependency metadata.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the composite type is unsupported.
+     *
+     * @return \FireHub\Container\Validation\Result Container validation result.
+     */
+    public function validate ():Result {
+
+        return new Validator(
+            $this->registry,
+            $this->parameters,
+            $this->contextual,
+            $this->tags
+        )->validate();
 
     }
 
