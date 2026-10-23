@@ -18,10 +18,12 @@ use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance
 };
 use FireHub\Container\Internal\ {
-    ConstructorMetadataCache, ContextualBindingRegistry, ContextualCandidateSelector, DependencyPlanCache,
-    ParameterBindingRegistry, ParameterPlan, ParameterPlanCompiler, TypeMatcher
+    CandidateSelector, ConstructorMetadataCache, ContextualBindingRegistry, ContextualCandidateSelector, DependencyPlan,
+    DependencyPlanCache, ParameterBindingRegistry, ParameterPlan, ParameterPlanCompiler, TypeMatcher
 };
-use FireHub\Container\Exception\AmbiguousDependencyException;
+use FireHub\Container\Exception\ {
+    AmbiguousDependencyException, ServiceInstantiationException
+};
 use FireHub\Runtime;
 
 /**
@@ -64,8 +66,19 @@ final readonly class DependencyGraph {
     private ContextualCandidateSelector $contextual_selector;
 
     /**
+     * ### Dependency candidate selector
+     *
+     * Selects and validates dependency implementations using the same type compatibility rules as runtime resolution.
+     * @since 1.0.0
+     */
+    private CandidateSelector $selector;
+
+    /**
      * ### Constructor
      * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Registry::has() To check if a service is registered.
+     * @uses \FireHub\Container\Registry::implementations() To retrieve all registered service implementations.
      *
      * @param \FireHub\Container\Registry $registry <p>
      * Registered service definitions.
@@ -98,6 +111,12 @@ final readonly class DependencyGraph {
             $contextual
         );
 
+        $this->selector = new CandidateSelector(
+            $this->matcher,
+            fn (string $id):bool => $this->registry->has($id),
+            fn ():iterable => $this->registry->implementations()
+        );
+
     }
 
     /**
@@ -117,8 +136,7 @@ final readonly class DependencyGraph {
      */
     public function validate ():array {
 
-        $issues = [];
-
+        $issues = []; $reported_cycles = [];
         foreach ($this->registry->all() as $id => $definition) {
 
             if (!$definition instanceof Cls)
@@ -130,7 +148,8 @@ final readonly class DependencyGraph {
             $this->inspect(
                 $id,
                 [],
-                $issues
+                $issues,
+                $reported_cycles
             );
 
         }
@@ -166,21 +185,27 @@ final readonly class DependencyGraph {
      * @param list<\FireHub\Container\Validation\Issue> $issues <p>
      * Collected validation issues.
      * </p>
+     * @param array<non-empty-string, true> $reported_cycles <p>
+     * Canonical signatures of dependency cycles already reported during the current validation run.
+     * </p>
      *
      * @return void
      */
-    private function inspect (string $id, array $path, array &$issues):void {
+    private function inspect (string $id, array $path, array &$issues, array &$reported_cycles):void {
+
+        $canonical = $this->canonicalId($id);
+
+        if ($canonical === null) return;
+
+        $id = $canonical;
 
         if (Runtime\Arr\Inspection::inArray($path, $id)) {
 
-            $path[] = $id;
-
-            $issues[] = new Issue(
-                IssueType::CIRCULAR_DEPENDENCY,
-                Severity::ERROR,
+            $this->reportCycle(
                 $id,
-                'Circular dependency detected: ' . Runtime\Str\SB\Delimiter::implode($path, ' -> '),
-                $path
+                $path,
+                $issues,
+                $reported_cycles
             );
 
             return;
@@ -190,18 +215,6 @@ final readonly class DependencyGraph {
         $path[] = $id;
 
         $definition = $this->registry->find($id);
-
-        if ($definition instanceof Alias) {
-
-            $this->inspect(
-                $definition->target,
-                $path,
-                $issues
-            );
-
-            return;
-
-        }
 
         if ($definition instanceof Instance || $definition instanceof Factory)
             return;
@@ -213,7 +226,13 @@ final readonly class DependencyGraph {
         if (!$this->matcher->isConstructible($class))
             return;
 
-        $plan = $this->plans->get($class);
+        $plan = $this->safeDependencyPlan(
+            $class,
+            $path,
+            $issues
+        );
+
+        if ($plan === null) return;
 
         foreach ($plan->parameters as $parameter) {
 
@@ -232,8 +251,7 @@ final readonly class DependencyGraph {
                 $issues
             );
 
-            if ($ambiguous)
-                continue;
+            if ($ambiguous) continue;
 
             if ($contextual !== null) {
 
@@ -242,7 +260,8 @@ final readonly class DependencyGraph {
                     $contextual,
                     $parameter,
                     $path,
-                    $issues
+                    $issues,
+                    $reported_cycles
                 );
 
                 continue;
@@ -296,7 +315,8 @@ final readonly class DependencyGraph {
             $this->inspect(
                 $dependency,
                 $path,
-                $issues
+                $issues,
+                $reported_cycles
             );
 
         }
@@ -382,6 +402,7 @@ final readonly class DependencyGraph {
      * @uses \FireHub\Container\Validation\DependencyGraph::inspect() To recursively validate child dependencies.
      * @uses \FireHub\Container\Validation\DependencyGraph::implementationOf() To find the statically known
      * implementation.
+     * @uses \FireHub\Container\Internal\CandidateSelector::matchesType() To check if a service implementation.
      *
      * @param class-string $consumer <p>
      * Consumer implementation class.
@@ -398,10 +419,13 @@ final readonly class DependencyGraph {
      * @param list<\FireHub\Container\Validation\Issue> $issues <p>
      * Collected validation issues.
      * </p>
+     * @param array<non-empty-string, true> $reported_cycles <p>
+     * Canonical signatures of dependency cycles already reported during the current validation run.
+     * </p>
      *
      * @return void
      */
-    private function inspectContextualDependency (string $consumer, string $dependency, ParameterPlan $parameter, array $path, array &$issues):void {
+    private function inspectContextualDependency (string $consumer, string $dependency, ParameterPlan $parameter, array $path, array &$issues, array &$reported_cycles):void {
 
         if (
             !$this->registry->has($dependency)
@@ -426,44 +450,33 @@ final readonly class DependencyGraph {
 
             $type = $parameter->parameter->getType();
 
-            if ($type !== null) {
-
-                $metadata = new ConstructorMetadataCache;
-
-                $matcher = new TypeMatcher($metadata);
-
-                $selector = new \FireHub\Container\Internal\CandidateSelector(
-                    $matcher,
-                    fn (string $id):bool => $this->registry->has($id),
-                    fn ():iterable => $this->registry->implementations()
-                );
-
-                if (!$selector->matchesType(
+            if (
+                $type !== null
+                && !$this->selector->matchesType(
                     $implementation,
                     $parameter->parameter,
                     $type
-                )) {
+                )
+            ) {
 
-                    $issues[] = new Issue(
-                        IssueType::INVALID_CONTEXTUAL_BINDING,
-                        Severity::ERROR,
-                        $consumer,
-                        "Contextual implementation '$implementation' does not satisfy parameter '{$parameter->parameter->getName()}' of '$consumer'.",
-                        [...$path, $dependency]
-                    );
+                $issues[] = new Issue(
+                    IssueType::INVALID_CONTEXTUAL_BINDING,
+                    Severity::ERROR,
+                    $consumer,
+                    "Contextual implementation '$implementation' does not satisfy parameter '{$parameter->parameter->getName()}' of '$consumer'.",
+                    [...$path, $dependency]
+                );
 
-                    return;
-
-                }
+                return;
 
             }
 
         }
-
         $this->inspect(
             $dependency,
             $path,
-            $issues
+            $issues,
+            $reported_cycles
         );
 
     }
@@ -521,6 +534,169 @@ final readonly class DependencyGraph {
                 : null;
 
         }
+
+    }
+
+    /**
+     * ### Resolves a canonical service identifier
+     *
+     * Follows registered service aliases without constructing services.
+     *
+     * Invalid and circular alias chains are ignored because they are validated separately by the main validator.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Registry::find() To retrieve service definitions.
+     * @uses \FireHub\Container\Registry::has() To check whether an alias target exists.
+     *
+     * @param class-string $id <p>
+     * Service identifier.
+     * </p>
+     *
+     * @return null|class-string Canonical service identifier, or null when the alias chain is invalid.
+     */
+    private function canonicalId (string $id):?string {
+
+        $visited = [];
+
+        while (true) {
+
+            if (isset($visited[$id]))
+                return null;
+
+            $visited[$id] = true;
+
+            $definition = $this->registry->find($id);
+
+            if (!$definition instanceof Alias)
+                return $id;
+
+            if (!$this->registry->has($definition->target))
+                return null;
+
+            $id = $definition->target;
+
+        }
+
+    }
+
+    /**
+     * ### Safely retrieves a constructor dependency plan
+     *
+     * Compiles constructor dependency metadata and converts invalid dependency plans into validation issues.
+     *
+     * Compilation failures do not interrupt the validation of other registered services.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\DependencyPlanCache::get() To retrieve the dependency plan.
+     *
+     * @param class-string $class <p>
+     * Implementation class.
+     * </p>
+     * @param list<class-string> $path <p>
+     * Active dependency path.
+     * </p>
+     * @param list<\FireHub\Container\Validation\Issue> $issues <p>
+     * Collected validation issues.
+     * </p>
+     *
+     * @return null|\FireHub\Container\Internal\DependencyPlan Compiled dependency plan, or null when invalid.
+     */
+    private function safeDependencyPlan (string $class, array $path, array &$issues):?DependencyPlan {
+
+        try {
+
+            return $this->plans->get($class);
+
+        } catch (ServiceInstantiationException $exception) {
+
+            $issues[] = new Issue(
+                IssueType::INVALID_DEPENDENCY_PLAN,
+                Severity::ERROR,
+                $class,
+                "Unable to compile constructor dependency plan for '$class': {$exception->getMessage()}",
+                $path
+            );
+
+            return null;
+
+        }
+
+    }
+
+    /**
+     * ### Reports a unique circular dependency
+     *
+     * Normalizes directed dependency cycles to prevent duplicate reports caused by different traversal starting points.
+     *
+     * Cyclic rotations are considered equivalent, while reversed paths remain distinct.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Runtime\Arr\Access::search() To find the starting index of a cycle.
+     * @uses \FireHub\Runtime\Arr\Structure::slice() To extract a subarray of a cycle.
+     * @uses \FireHub\Runtime\Arr\Inspection::count() To determine the length of a cycle.
+     * @uses \FireHub\Runtime\Arr\Ordering::sort() To sort a cycle signature array.
+     * @uses \FireHub\Runtime\Str\SB\Delimiter::implode() To join a cycle signature array.
+     * @uses \FireHub\Runtime\Data::serialize() To serialize signatures.
+     *
+     * @param class-string $id <p>
+     * Service identifier closing the cycle.
+     * </p>
+     * @param list<class-string> $path <p>
+     * Active dependency path.
+     * </p>
+     * @param list<\FireHub\Container\Validation\Issue> $issues <p>
+     * Collected validation issues.
+     * </p>
+     * @param array<non-empty-string, true> $reported_cycles <p>
+     * Previously reported cycle signatures.
+     * </p>
+     *
+     * @return void
+     */
+    private function reportCycle (string $id, array $path, array &$issues, array &$reported_cycles):void {
+
+        $start = Runtime\Arr\Access::search($path, $id);
+
+        if ($start === false)
+            return;
+
+        $cycle = Runtime\Arr\Structure::slice($path, $start);
+
+        $count = Runtime\Arr\Inspection::count($cycle);
+
+        if ($count === 0) return;
+
+        $signatures = [];
+
+        for ($index = 0; $index < $count; $index++) {
+
+            $rotation = [
+                ...Runtime\Arr\Structure::slice($cycle, $index),
+                ...Runtime\Arr\Structure::slice($cycle, 0, $index)
+            ];
+
+            $signatures[] = Runtime\Data::serialize($rotation);
+
+        }
+
+        Runtime\Arr\Ordering::sort($signatures, type: Runtime\Type\Arr\SortType::STRING);
+
+        /** @var non-empty-string $signature */
+        $signature = $signatures[0]; // @phpstan-ignore offsetAccess.notFound
+
+        if (isset($reported_cycles[$signature])) return;
+
+        $reported_cycles[$signature] = true;
+
+        $cycle[] = $id;
+
+        $issues[] = new Issue(
+            IssueType::CIRCULAR_DEPENDENCY,
+            Severity::ERROR,
+            $id,
+            'Circular dependency detected: ' . Runtime\Str\SB\Delimiter::implode($cycle, ' -> '),
+            $cycle
+        );
 
     }
 

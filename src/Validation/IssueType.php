@@ -140,4 +140,12 @@ enum IssueType {
      */
     case UNVERIFIABLE_FACTORY;
 
+    /**
+     * ### Invalid dependency plan
+     *
+     * Constructor dependency metadata cannot be compiled because of invalid or unsupported injection configuration.
+     * @since 1.0.0
+     */
+    case INVALID_DEPENDENCY_PLAN;
+
 }
