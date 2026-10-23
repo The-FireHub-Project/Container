@@ -18,8 +18,7 @@ use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance
 };
 use FireHub\Container\Internal\ {
-    ConstructorMetadataCache, ContextualBindingRegistry, DependencyPlanCache, ParameterBindingRegistry, ParameterPlan,
-    ParameterPlanCompiler, TypeMatcher
+    ContextualBindingRegistry, DependencyPlanCache, ParameterBindingRegistry
 };
 use FireHub\Container\Exception\ServiceInstantiationException;
 use FireHub\Runtime;
@@ -57,23 +56,20 @@ final readonly class ContextualBinding {
      * @param \FireHub\Container\Internal\ParameterBindingRegistry $parameters <p>
      * Registered constructor parameter bindings.
      * </p>
+     * @param \FireHub\Container\Internal\DependencyPlanCache $plans <p>
+     * Compiled dependency plan cache.
+     * </p>
      *
      * @return void
      */
     public function __construct (
         private Registry $registry,
         private ContextualBindingRegistry $bindings,
-        private ParameterBindingRegistry $parameters
+        private ParameterBindingRegistry $parameters,
+        DependencyPlanCache $plans
     ) {
 
-        $metadata = new ConstructorMetadataCache;
-
-        $this->plans = new DependencyPlanCache(
-            $metadata,
-            new ParameterPlanCompiler(
-                new TypeMatcher($metadata)
-            )
-        );
+        $this->plans = $plans;
 
     }
 

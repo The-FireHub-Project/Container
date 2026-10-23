@@ -7,7 +7,7 @@
  * @copyright 2026-present The FireHub Project - All rights reserved
  * @license https://opensource.org/license/Apache-2-0 Apache License, Version 2.0
  *
- * @php-version >=8.2
+ * @php-version >=8.5
  * @package Container
  */
 
@@ -20,7 +20,8 @@ use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance
 };
 use FireHub\Container\Internal\ {
-    ContextualBindingRegistry, ParameterBindingRegistry, TagRegistry
+    ConstructorMetadataCache, ContextualBindingRegistry, DependencyPlanCache, ParameterBindingRegistry,
+    ParameterPlanCompiler, TagRegistry, TypeMatcher
 };
 use FireHub\Runtime;
 use ReflectionClass, ReflectionException;
@@ -97,6 +98,15 @@ final readonly class Validator {
      */
     public function validate ():Result {
 
+        $metadata = new ConstructorMetadataCache;
+
+        $matcher = new TypeMatcher($metadata);
+
+        $plans = new DependencyPlanCache(
+            $metadata,
+            new ParameterPlanCompiler($matcher)
+        );
+
         $issues = [];
 
         foreach ($this->registry->all() as $id => $definition) {
@@ -130,7 +140,9 @@ final readonly class Validator {
             $this->registry,
             $this->bindings,
             $this->contextual,
-            $this->tags
+            $this->tags,
+            $plans,
+            $matcher
         )->validate();
 
         Runtime\Arr\Mutation::push($issues, ...$dependency_issues);
@@ -144,7 +156,8 @@ final readonly class Validator {
         $contextual_issues = new ContextualBinding(
             $this->registry,
             $this->contextual,
-            $this->bindings
+            $this->bindings,
+            $plans
         )->validate();
 
         Runtime\Arr\Mutation::push($issues, ...$contextual_issues);
@@ -153,7 +166,9 @@ final readonly class Validator {
             $this->registry,
             $this->bindings,
             $this->contextual,
-            $this->tags
+            $this->tags,
+            $plans,
+            $matcher
         )->validate();
 
         Runtime\Arr\Mutation::push($issues, ...$lifetime_issues);

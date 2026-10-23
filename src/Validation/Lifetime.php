@@ -87,6 +87,12 @@ final readonly class Lifetime {
      * @param \FireHub\Container\Internal\TagRegistry $tags <p>
      * Registered service tags.
      * </p>
+     * @param \FireHub\Container\Internal\DependencyPlanCache $plans <p>
+     * Compiled dependency plans.
+     * </p>
+     * @param \FireHub\Container\Internal\TypeMatcher $matcher <p>
+     * Dependency type matcher.
+     * </p>
      *
      * @return void
      */
@@ -94,17 +100,14 @@ final readonly class Lifetime {
         private Registry $registry,
         private ParameterBindingRegistry $bindings,
         ContextualBindingRegistry $contextual,
-        private TagRegistry $tags
+        private TagRegistry $tags,
+        DependencyPlanCache $plans,
+        TypeMatcher $matcher
     ) {
 
-        $metadata = new ConstructorMetadataCache;
+        $this->plans = $plans;
 
-        $this->matcher = new TypeMatcher($metadata);
-
-        $this->plans = new DependencyPlanCache(
-            $metadata,
-            new ParameterPlanCompiler($this->matcher)
-        );
+        $this->matcher = $matcher;
 
         $this->contextual_selector = new ContextualCandidateSelector(
             $contextual
