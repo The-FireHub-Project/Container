@@ -1227,6 +1227,8 @@ final readonly class Container implements ContainerBoundary, Registrar {
      *
      * @throws \FireHub\Container\Exception\ServiceInstantiationException If a constructor parameter contains invalid
      * injection attributes or unsupported dependency metadata.
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the composite type is unsupported.
      *
      * @return \FireHub\Container\Validation\Result Container validation result.
      */

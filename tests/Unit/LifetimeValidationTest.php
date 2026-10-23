@@ -19,9 +19,11 @@ use FireHub\Container\Validation\ {
 };
 use FireHub\Testing\FireHubTestCase;
 use FireHub\Tests\Container\Stubs\ {
+    CollectionValidationConsumer, CollectionValidationFirst, ContextualDnfConsumer, ContextualFileLogger,
+    ContextualIntersectionConsumer, ContextualLogger, ContextualNamedConsumer, ContextualUnionConsumer,
     LifetimeValidationExplicitConsumer, LifetimeValidationFactoryConsumer, LifetimeValidationNestedSingleton,
     LifetimeValidationSafeConsumer, LifetimeValidationSafeSingleton, LifetimeValidationScoped,
-    LifetimeValidationSingleton, LifetimeValidationTransient
+    LifetimeValidationSingleton, LifetimeValidationTransient, TaggedFileLogger, TaggedValidationConsumer
 };
 use PHPUnit\Framework\Attributes\ {
     CoversClass, Group, Small
@@ -223,6 +225,197 @@ final class LifetimeValidationTest extends FireHubTestCase {
         $container->validate();
 
         self::assertSame(0, $executions);
+
+    }
+
+    /**
+     * ### Detects scoped dependencies selected through contextual bindings
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testContextualScopedDependency ():void {
+
+        $container = new Container;
+
+        $container->scoped(ContextualFileLogger::class);
+        $container->singleton(ContextualNamedConsumer::class);
+
+        $container->bindContextual(
+            ContextualNamedConsumer::class,
+            ContextualLogger::class,
+            ContextualFileLogger::class
+        );
+
+        $issues = $this->issuesOfType(
+            $container->validate(),
+            IssueType::LIFETIME_MISMATCH
+        );
+
+        self::assertCount(1, $issues);
+
+        self::assertSame(
+            [
+                ContextualNamedConsumer::class,
+                ContextualFileLogger::class
+            ],
+            $issues[0]->path
+        );
+
+    }
+
+    /**
+     * ### Detects scoped dependencies selected through union types
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testUnionScopedDependency ():void {
+
+        $container = new Container;
+
+        $container->scoped(ContextualFileLogger::class);
+        $container->singleton(ContextualUnionConsumer::class);
+
+        $issues = $this->issuesOfType(
+            $container->validate(),
+            IssueType::LIFETIME_MISMATCH
+        );
+
+        self::assertCount(1, $issues);
+
+        self::assertSame(
+            [
+                ContextualUnionConsumer::class,
+                ContextualFileLogger::class
+            ],
+            $issues[0]->path
+        );
+
+    }
+
+    /**
+     * ### Detects scoped dependencies selected through intersection types
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testIntersectionScopedDependency ():void {
+
+        $container = new Container;
+
+        $container->scoped(ContextualFileLogger::class);
+        $container->singleton(ContextualIntersectionConsumer::class);
+
+        $issues = $this->issuesOfType(
+            $container->validate(),
+            IssueType::LIFETIME_MISMATCH
+        );
+
+        self::assertCount(1, $issues);
+
+        self::assertSame(
+            [
+                ContextualIntersectionConsumer::class,
+                ContextualFileLogger::class
+            ],
+            $issues[0]->path
+        );
+
+    }
+
+    /**
+     * ### Detects scoped dependencies selected through DNF types
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testDnfScopedDependency ():void {
+
+        $container = new Container;
+
+        $container->scoped(ContextualFileLogger::class);
+        $container->singleton(ContextualDnfConsumer::class);
+
+        $issues = $this->issuesOfType(
+            $container->validate(),
+            IssueType::LIFETIME_MISMATCH
+        );
+
+        self::assertCount(1, $issues);
+
+        self::assertSame(
+            [
+                ContextualDnfConsumer::class,
+                ContextualFileLogger::class
+            ],
+            $issues[0]->path
+        );
+
+    }
+
+    /**
+     * ### Detects scoped dependencies injected through tags
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testTaggedScopedDependency ():void {
+
+        $container = new Container;
+
+        $container->scoped(TaggedFileLogger::class);
+        $container->singleton(TaggedValidationConsumer::class);
+
+        $container->tag(
+            'validation.services',
+            TaggedFileLogger::class
+        );
+
+        $issues = $this->issuesOfType(
+            $container->validate(),
+            IssueType::LIFETIME_MISMATCH
+        );
+
+        self::assertCount(1, $issues);
+
+        self::assertSame(
+            [
+                TaggedValidationConsumer::class,
+                TaggedFileLogger::class
+            ],
+            $issues[0]->path
+        );
+
+    }
+
+    /**
+     * ### Detects scoped dependencies injected through collections
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testCollectionScopedDependency ():void {
+
+        $container = new Container;
+
+        $container->scoped(CollectionValidationFirst::class);
+        $container->singleton(CollectionValidationConsumer::class);
+
+        $issues = $this->issuesOfType(
+            $container->validate(),
+            IssueType::LIFETIME_MISMATCH
+        );
+
+        self::assertCount(1, $issues);
+
+        self::assertSame(
+            [
+                CollectionValidationConsumer::class,
+                CollectionValidationFirst::class
+            ],
+            $issues[0]->path
+        );
 
     }
 
