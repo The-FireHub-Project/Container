@@ -1225,6 +1225,9 @@ final readonly class Container implements ContainerBoundary, Registrar {
      *
      * @uses \FireHub\Container\Validation::validate() To validate registered service definitions.
      *
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If a constructor parameter contains invalid
+     * injection attributes or unsupported dependency metadata.
+     *
      * @return \FireHub\Container\Validation\Result Container validation result.
      */
     public function validate ():Result {

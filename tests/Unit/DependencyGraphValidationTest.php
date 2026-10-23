@@ -21,14 +21,14 @@ use FireHub\Container\Validation\ {
 use FireHub\Tests\Container\Stubs\ {
     CircularA, CircularB, CollectionInjectionConflictingAttributesConsumer, CollectionValidationCircular,
     CollectionValidationConsumer, CollectionValidationContract, CollectionValidationFirst,
-    CollectionValidationMissingDependency, CollectionValidationNested, CollectionValidationSecond, ContextualCircularA,
-    ContextualCircularB, ContextualFileLogger, ContextualLogger, DnfCacheService, DnfDefaultConsumer, DnfFileLogger,
-    DnfFirstBranchConsumer, DnfNestedConsumer, DnfNoCandidateConsumer, DnfRequiredNullableConsumer,
-    DnfSecondBranchConsumer, DnfSerializableCache, DnfTwoIntersectionsConsumer, DnfUniversalService,
-    IntersectionConsumer, Logger, LoggerInterface, ParameterBindingValidationComposite,
-    ParameterBindingValidationContract, ParameterBindingValidationService, TaggedCircularConsumer,
-    TaggedValidationConsumer, TestFileLogger, TestLogger, UnionA, UnionAmbiguous, UnionB, UnionNullable, UnionOnlyA,
-    ValidationConstructionProbe
+    CollectionValidationMissingDependency, CollectionValidationNested, CollectionValidationSecond, ContextualCache,
+    ContextualCacheService, ContextualCircularA, ContextualCircularB, ContextualDnfConsumer, ContextualFileLogger,
+    ContextualIntersectionConsumer, ContextualLogger, ContextualNamedConsumer, ContextualUnionConsumer, DnfCacheService,
+    DnfDefaultConsumer, DnfFileLogger, DnfFirstBranchConsumer, DnfNestedConsumer, DnfNoCandidateConsumer,
+    DnfRequiredNullableConsumer, DnfSecondBranchConsumer, DnfSerializableCache, DnfTwoIntersectionsConsumer,
+    DnfUniversalService, IntersectionConsumer, Logger, LoggerInterface, ParameterBindingValidationComposite,
+    ParameterBindingValidationService, TaggedCircularConsumer, TaggedValidationConsumer, TestFileLogger, TestLogger,
+    UnionA, UnionAmbiguous, UnionB, UnionNullable, UnionOnlyA, ValidationConstructionProbe
 };
 use PHPUnit\Framework\Attributes\ {
     CoversClass, Group, Small
@@ -1768,6 +1768,541 @@ final class DependencyGraphValidationTest extends FireHubTestCase {
             $this->issuesOfType(
                 $container->validate(),
                 IssueType::INVALID_PARAMETER_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Validates a named contextual dependency binding
+     *
+     * A compatible contextual implementation must satisfy the consumer's declared dependency contract.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testValidNamedContextualBinding ():void {
+
+        $container = new Container;
+
+        $container->singleton(ContextualNamedConsumer::class);
+
+        $container->bindContextual(
+            ContextualNamedConsumer::class,
+            ContextualLogger::class,
+            ContextualFileLogger::class
+        );
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+        self::assertSame(
+            [],
+            $this->issuesOfType(
+                $result,
+                IssueType::INVALID_CONTEXTUAL_BINDING
+            )
+        );
+
+        self::assertSame(
+            [],
+            $this->issuesOfType(
+                $result,
+                IssueType::UNUSED_CONTEXTUAL_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Validates contextual bindings without consumer registration
+     *
+     * Contextual binding configuration must be validated independently of explicit consumer service registration.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testContextualBindingWithoutRegisteredConsumer ():void {
+
+        $container = new Container;
+
+        $container->bindContextual(
+            ContextualNamedConsumer::class,
+            ContextualLogger::class,
+            ContextualFileLogger::class
+        );
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+        self::assertSame(
+            [],
+            $this->issuesOfType(
+                $result,
+                IssueType::INVALID_CONTEXTUAL_BINDING
+            )
+        );
+
+        self::assertSame(
+            [],
+            $this->issuesOfType(
+                $result,
+                IssueType::UNUSED_CONTEXTUAL_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Validates contextual bindings for union dependencies
+     *
+     * A contextual dependency contract matching one union member must be recognized as used.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testValidUnionContextualBinding ():void {
+
+        $container = new Container;
+
+        $container->singleton(ContextualUnionConsumer::class);
+
+        $container->bindContextual(
+            ContextualUnionConsumer::class,
+            ContextualLogger::class,
+            ContextualFileLogger::class
+        );
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+        self::assertSame(
+            [],
+            $this->issuesOfType(
+                $result,
+                IssueType::UNUSED_CONTEXTUAL_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Validates contextual bindings for intersection dependencies
+     *
+     * A contextual implementation satisfying every intersection member must pass static validation.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testValidIntersectionContextualBinding ():void {
+
+        $container = new Container;
+
+        $container->singleton(ContextualIntersectionConsumer::class);
+
+        $container->bindContextual(
+            ContextualIntersectionConsumer::class,
+            ContextualLogger::class,
+            ContextualFileLogger::class
+        );
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+        self::assertSame(
+            [],
+            $this->issuesOfType(
+                $result,
+                IssueType::INVALID_CONTEXTUAL_BINDING
+            )
+        );
+
+        self::assertSame(
+            [],
+            $this->issuesOfType(
+                $result,
+                IssueType::UNUSED_CONTEXTUAL_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Validates contextual bindings for DNF dependencies
+     *
+     * Contextual dependency contracts referenced within nested DNF branches must be recognized during validation.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testValidDnfContextualBinding ():void {
+
+        $container = new Container;
+
+        $container->singleton(ContextualDnfConsumer::class);
+
+        $container->bindContextual(
+            ContextualDnfConsumer::class,
+            ContextualLogger::class,
+            ContextualFileLogger::class
+        );
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+        self::assertSame(
+            [],
+            $this->issuesOfType(
+                $result,
+                IssueType::UNUSED_CONTEXTUAL_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Detects contextual bindings referencing unknown consumers
+     *
+     * A contextual binding whose consumer class does not exist must produce an invalid contextual binding issue.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testUnknownContextualConsumer ():void {
+
+        $container = new Container;
+
+        $container->bindContextual(
+            'FireHub\\Tests\\Container\\Stubs\\MissingContextualConsumer',
+            ContextualLogger::class,
+            ContextualFileLogger::class
+        );
+
+        $result = $container->validate();
+
+        self::assertFalse($result->isValid());
+
+        self::assertCount(
+            1,
+            $this->issuesOfType(
+                $result,
+                IssueType::INVALID_CONTEXTUAL_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Detects contextual bindings referencing unknown dependency contracts
+     *
+     * Contextual dependency contracts must reference existing classes or interfaces.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testUnknownContextualDependency ():void {
+
+        $container = new Container;
+
+        $container->bindContextual(
+            ContextualNamedConsumer::class,
+            'FireHub\\Tests\\Container\\Stubs\\MissingContextualContract',
+            ContextualFileLogger::class
+        );
+
+        $result = $container->validate();
+
+        self::assertFalse($result->isValid());
+
+        self::assertCount(
+            1,
+            $this->issuesOfType(
+                $result,
+                IssueType::INVALID_CONTEXTUAL_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Detects contextual bindings referencing unknown implementations
+     *
+     * A contextual implementation must reference a registered service or an implicitly constructible class.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testUnknownContextualImplementation ():void {
+
+        $container = new Container;
+
+        $container->bindContextual(
+            ContextualNamedConsumer::class,
+            ContextualLogger::class,
+            'FireHub\\Tests\\Container\\Stubs\\MissingContextualImplementation'
+        );
+
+        $result = $container->validate();
+
+        self::assertFalse($result->isValid());
+
+        self::assertCount(
+            1,
+            $this->issuesOfType(
+                $result,
+                IssueType::INVALID_CONTEXTUAL_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Detects incompatible contextual implementations
+     *
+     * A contextual implementation that does not satisfy its registered dependency contract must be rejected.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testIncompatibleContextualImplementation ():void {
+
+        $container = new Container;
+
+        $container->bindContextual(
+            ContextualNamedConsumer::class,
+            ContextualLogger::class,
+            \stdClass::class
+        );
+
+        $result = $container->validate();
+
+        self::assertFalse($result->isValid());
+
+        self::assertCount(
+            1,
+            $this->issuesOfType(
+                $result,
+                IssueType::INVALID_CONTEXTUAL_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Reports contextual bindings unused by constructor injection
+     *
+     * A structurally valid contextual binding must produce a warning when its dependency contract is not referenced
+     * by any eligible constructor parameter.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testUnusedContextualBinding ():void {
+
+        $container = new Container;
+
+        $container->bindContextual(
+            ContextualNamedConsumer::class,
+            ContextualCache::class,
+            ContextualCacheService::class
+        );
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+        $issues = $this->issuesOfType(
+            $result,
+            IssueType::UNUSED_CONTEXTUAL_BINDING
+        );
+
+        self::assertCount(1, $issues);
+
+        self::assertSame(
+            Severity::WARNING,
+            $issues[0]->severity
+        );
+
+    }
+
+    /**
+     * ### Reports contextual bindings shadowed by explicit parameter bindings
+     *
+     * Explicit constructor parameter bindings take precedence over contextual dependency resolution.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testContextualBindingShadowedByParameterBinding ():void {
+
+        $container = new Container;
+
+        $container->singleton(ContextualNamedConsumer::class);
+
+        $container->bindParameters(
+            ContextualNamedConsumer::class,
+            [
+                'logger' => new ContextualFileLogger
+            ]
+        );
+
+        $container->bindContextual(
+            ContextualNamedConsumer::class,
+            ContextualLogger::class,
+            ContextualFileLogger::class
+        );
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+        self::assertCount(
+            1,
+            $this->issuesOfType(
+                $result,
+                IssueType::UNUSED_CONTEXTUAL_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Detects ambiguous contextual dependency candidates
+     *
+     * Two contextual bindings selecting distinct implementations for the same union parameter must produce an
+     * ambiguous dependency issue.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testAmbiguousContextualBindings ():void {
+
+        $container = new Container;
+
+        $container->singleton(ContextualUnionConsumer::class);
+
+        $container->bindContextual(
+            ContextualUnionConsumer::class,
+            ContextualLogger::class,
+            ContextualFileLogger::class
+        );
+
+        $container->bindContextual(
+            ContextualUnionConsumer::class,
+            ContextualCache::class,
+            ContextualCacheService::class
+        );
+
+        $result = $container->validate();
+
+        self::assertFalse($result->isValid());
+
+        self::assertCount(
+            1,
+            $this->issuesOfType(
+                $result,
+                IssueType::AMBIGUOUS_DEPENDENCY
+            )
+        );
+
+    }
+
+    /**
+     * ### Validates contextual implementations referenced through service aliases
+     *
+     * A contextual implementation referenced through a valid alias must retain its underlying type compatibility.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testContextualBindingWithAliasImplementation ():void {
+
+        $container = new Container;
+
+        $container->singleton(ContextualFileLogger::class);
+
+        $container->alias(
+            ContextualLogger::class,
+            ContextualFileLogger::class
+        );
+
+        $container->bindContextual(
+            ContextualNamedConsumer::class,
+            ContextualLogger::class,
+            ContextualLogger::class
+        );
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+        self::assertSame(
+            [],
+            $this->issuesOfType(
+                $result,
+                IssueType::INVALID_CONTEXTUAL_BINDING
+            )
+        );
+
+    }
+
+    /**
+     * ### Does not execute contextual factory implementations during validation
+     *
+     * Static contextual binding validation must not execute registered factory callbacks.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testContextualBindingValidationDoesNotExecuteFactories ():void {
+
+        $executions = 0;
+
+        $container = new Container;
+
+        $container->singleton(ContextualNamedConsumer::class);
+
+        $container->factory(
+            ContextualLogger::class,
+            function ($resolver) use (&$executions) {
+
+                $executions++;
+
+                return new ContextualFileLogger;
+
+            }
+        );
+
+        $container->bindContextual(
+            ContextualNamedConsumer::class,
+            ContextualLogger::class,
+            ContextualLogger::class
+        );
+
+        $result = $container->validate();
+
+        self::assertSame(0, $executions);
+
+        self::assertTrue($result->isValid());
+
+        self::assertSame(
+            [],
+            $this->issuesOfType(
+                $result,
+                IssueType::INVALID_CONTEXTUAL_BINDING
+            )
+        );
+
+        self::assertCount(
+            1,
+            $this->issuesOfType(
+                $result,
+                IssueType::UNVERIFIABLE_FACTORY
             )
         );
 

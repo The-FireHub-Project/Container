@@ -14,7 +14,7 @@
 namespace FireHub\Container;
 
 use FireHub\Container\Validation\ {
-    DependencyGraph, Issue, IssueType, ParameterBinding, Result, Severity
+    ContextualBinding, DependencyGraph, Issue, IssueType, ParameterBinding, Result, Severity
 };
 use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance
@@ -86,6 +86,9 @@ final readonly class Validator {
      * @uses \FireHub\Container\Validator::validateAlias() To validate alias chains.
      * @uses \FireHub\Runtime\Arr\Mutation::push() To append validation issues.
      *
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If a constructor parameter contains invalid
+     * injection attributes or unsupported dependency metadata.
+     *
      * @return \FireHub\Container\Validation\Result Validation result.
      */
     public function validate ():Result {
@@ -128,7 +131,9 @@ final readonly class Validator {
 
         Runtime\Arr\Mutation::push($issues, ...$dependency_issues);
 
-        $binding_issues = new ParameterBinding(
+        $binding_issues = new ContextualBinding(
+            $this->registry,
+            $this->contextual,
             $this->bindings
         )->validate();
 

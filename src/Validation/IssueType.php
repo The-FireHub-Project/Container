@@ -148,4 +148,15 @@ enum IssueType {
      */
     case INVALID_DEPENDENCY_PLAN;
 
+    /**
+     * ### Unused contextual binding
+     *
+     * A contextual dependency binding is structurally valid but cannot participate in constructor dependency resolution
+     * because its dependency contract is not referenced by an eligible constructor parameter.
+     *
+     * This includes bindings shadowed by higher-priority explicit parameter bindings or collection injection attributes.
+     * @since 1.0.0
+     */
+    case UNUSED_CONTEXTUAL_BINDING;
+
 }
