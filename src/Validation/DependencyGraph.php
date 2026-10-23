@@ -19,12 +19,13 @@ use FireHub\Container\Definition\ {
 };
 use FireHub\Container\Internal\ {
     CandidateSelector, ConstructorMetadataCache, ContextualBindingRegistry, ContextualCandidateSelector, DependencyPlan,
-    DependencyPlanCache, ParameterBindingRegistry, ParameterPlan, ParameterPlanCompiler, TypeMatcher
+    DependencyPlanCache, ParameterBindingRegistry, ParameterPlan, ParameterPlanCompiler, TagRegistry, TypeMatcher
 };
 use FireHub\Container\Exception\ {
     AmbiguousDependencyException, ServiceInstantiationException
 };
 use FireHub\Runtime;
+use ReflectionIntersectionType, ReflectionUnionType;
 
 /**
  * ### Validates constructor dependency graphs
@@ -89,13 +90,17 @@ final readonly class DependencyGraph {
      * @param \FireHub\Container\Internal\ContextualBindingRegistry $contextual <p>
      * Contextual dependency binding registry.
      * </p>
+     * @param \FireHub\Container\Internal\TagRegistry $tags <p>
+     * Registered service tags.
+     * </p>
      *
      * @return void
      */
     public function __construct (
         private Registry $registry,
         private ParameterBindingRegistry $bindings,
-        ContextualBindingRegistry $contextual
+        ContextualBindingRegistry $contextual,
+        private TagRegistry $tags
     ) {
 
         $metadata = new ConstructorMetadataCache;
@@ -166,14 +171,22 @@ final readonly class DependencyGraph {
      * A dependency is considered circular when its service identifier already appears in the active path.
      * @since 1.0.0
      *
-     * @uses \FireHub\Runtime\Arr\Inspection::inArray() To check if a service identifier is already in the path.
+     * @uses \FireHub\Container\Validation\DependencyGraph::selectCompositeDependency() To select a composite dependency.
+     * @uses \FireHub\Container\Validation\DependencyGraph::reportCycle() To report a dependency cycle.
+     * @uses \FireHub\Container\Validation\DependencyGraph::canonicalId() To resolve a canonical service identifier.
+     * @uses \FireHub\Container\Validation\DependencyGraph::inspectTaggedDependencies() To validate tagged dependencies.
+     * @uses \FireHub\Container\Validation\DependencyGraph::inspectCollectionDependencies() To validate collection
+     * dependencies.
      * @uses \FireHub\Container\Registry::find() To retrieve a service definition.
      * @uses \FireHub\Container\Validation\DependencyGraph::inspect() To recursively validate child dependencies.
-     * @uses \FireHub\Container\Validation\DependencyGraph::selectContextualDependency() To select contextual dependencies.
-     * @uses \FireHub\Container\Validation\DependencyGraph::inspectContextualDependency() To validate contextual dependencies.
+     * @uses \FireHub\Container\Validation\DependencyGraph::selectContextualDependency() To select contextual
+     * dependencies.
+     * @uses \FireHub\Container\Validation\DependencyGraph::inspectContextualDependency() To validate contextual
+     * dependencies.
      * @uses \FireHub\Container\Internal\TypeMatcher::isConstructible() To check if a class is constructible.
      * @uses \FireHub\Container\Internal\DependencyPlanCache::get() To retrieve a compiled dependency plan.
      * @uses \FireHub\Container\Internal\ParameterBindingRegistry::has() To check if a parameter is explicitly bound.
+     * @uses \FireHub\Runtime\Arr\Inspection::inArray() To check if a service identifier is already in the path.
      * @uses \FireHub\Runtime\Str\SB\Delimiter::implode() To join path segments.
      *
      * @param class-string $id <p>
@@ -188,6 +201,10 @@ final readonly class DependencyGraph {
      * @param array<non-empty-string, true> $reported_cycles <p>
      * Canonical signatures of dependency cycles already reported during the current validation run.
      * </p>
+     *
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the union contains an unsupported
+     * intersection member.
      *
      * @return void
      */
@@ -238,11 +255,33 @@ final readonly class DependencyGraph {
 
             $name = $parameter->parameter->getName();
 
-            if ($this->bindings->has($class, $name))
+            if ($this->bindings->has($class, $name)) continue;
+
+            if ($parameter->tag !== null) {
+
+                $this->inspectTaggedDependencies(
+                    $parameter->tag,
+                    $path,
+                    $issues,
+                    $reported_cycles
+                );
+
                 continue;
 
-            if ($parameter->tag !== null || $parameter->collection !== null)
+            }
+
+            if ($parameter->collection !== null) {
+
+                $this->inspectCollectionDependencies(
+                    $parameter->collection,
+                    $path,
+                    $issues,
+                    $reported_cycles
+                );
+
                 continue;
+
+            }
 
             [$ambiguous, $contextual] = $this->selectContextualDependency(
                 $class,
@@ -268,10 +307,18 @@ final readonly class DependencyGraph {
 
             }
 
-            if ($parameter->composite !== null)
-                continue;
+            if ($parameter->composite !== null) {
 
-            $dependency = $parameter->id;
+                [$ambiguous, $dependency] = $this->selectCompositeDependency(
+                    $class,
+                    $parameter,
+                    $path,
+                    $issues
+                );
+
+                if ($ambiguous) continue;
+
+            } else $dependency = $parameter->id;
 
             if ($dependency === null) {
 
@@ -697,6 +744,265 @@ final readonly class DependencyGraph {
             'Circular dependency detected: ' . Runtime\Str\SB\Delimiter::implode($cycle, ' -> '),
             $cycle
         );
+
+    }
+
+    /**
+     * ### Selects a composite constructor dependency
+     *
+     * Resolves a statically identifiable service candidate for a constructor parameter declared with a union,
+     * intersection, or disjunctive normal form type.
+     *
+     * Candidate selection follows the same rules as runtime dependency resolution by delegating to the shared
+     * candidate selector.
+     *
+     * Union types require a uniquely identifiable eligible implementation. Intersection types require an implementation
+     * satisfying every declared constituent type. Disjunctive normal form types are evaluated through their union
+     * representation, allowing intersection branches to participate in candidate selection.
+     *
+     * Ambiguous candidate selection is converted into a validation issue without interrupting dependency graph analysis.
+     *
+     * The method does not instantiate services, execute factories, or modify container registrations.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\CandidateSelector::union() To select union and DNF dependencies.
+     * @uses \FireHub\Container\Internal\CandidateSelector::intersection() To select intersection dependencies.
+     *
+     * @param class-string $consumer <p>
+     * Concrete consumer implementation class.
+     * </p>
+     * @param \FireHub\Container\Internal\ParameterPlan $parameter <p>
+     * Compiled constructor parameter.
+     * </p>
+     * @param list<class-string> $path <p>
+     * Active dependency path.
+     * </p>
+     * @param list<\FireHub\Container\Validation\Issue> $issues <p>
+     * Collected validation issues.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the union contains an unsupported
+     * intersection member.
+     *
+     * @return array{0: bool, 1: null|class-string} Whether candidate selection was ambiguous and the selected
+     * dependency identifier, if available.
+     */
+    private function selectCompositeDependency (string $consumer, ParameterPlan $parameter, array $path, array &$issues):array {
+
+        $type = $parameter->composite;
+
+        if ($type === null)
+            return [false, null];
+
+        try {
+
+            $dependency = match (true) {
+
+                $type instanceof ReflectionUnionType => $this->selector->union(
+                    $parameter->parameter,
+                    $type
+                ),
+
+                $type instanceof ReflectionIntersectionType => $this->selector->intersection( // @phpstan-ignore instanceof.alwaysTrue
+                    $parameter->parameter,
+                    $type
+                )
+
+            };
+
+            return [false, $dependency];
+
+        } catch (AmbiguousDependencyException) {
+
+            $name = $parameter->parameter->getName();
+
+            $issues[] = new Issue(
+                IssueType::AMBIGUOUS_DEPENDENCY,
+                Severity::ERROR,
+                $consumer,
+                "Multiple implementations are eligible for composite parameter '$name' of '$consumer'.",
+                $path
+            );
+
+            return [true, null];
+
+        }
+
+    }
+
+    /**
+     * ### Inspects tagged constructor dependencies
+     *
+     * Recursively validates all services associated with the specified tag.
+     *
+     * Tagged service identifiers are retrieved in registration order using the shared tag registry. Each service is
+     * inspected within the active dependency path to detect missing dependencies, invalid dependency plans, and circular
+     * constructor dependencies.
+     *
+     * An unknown or empty tag produces no dependency validation issues because tagged injection permits empty
+     * collections.
+     *
+     * Service instances are not constructed, and factory callbacks are never executed during validation.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\TagRegistry::get() To retrieve tagged service identifiers.
+     * @uses \FireHub\Container\Registry::has() To verify registered service identifiers.
+     * @uses \FireHub\Container\Validation\DependencyGraph::inspect() To recursively validate tagged dependencies.
+     * @uses \FireHub\Runtime\Arr\Inspection::count() To determine the number of tagged services.
+     *
+     * @param non-empty-string $tag <p>
+     * Tag identifying the registered services.
+     * </p>
+     * @param list<class-string> $path <p>
+     * Active dependency path.
+     * </p>
+     * @param list<\FireHub\Container\Validation\Issue> $issues <p>
+     * Collected validation issues.
+     * </p>
+     * @param array<non-empty-string, true> $reported_cycles <p>
+     * Previously reported dependency cycle signatures.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the union contains an unsupported
+     * intersection member.
+     *
+     * @return void
+     */
+    private function inspectTaggedDependencies (string $tag, array $path, array &$issues, array &$reported_cycles):void {
+
+        foreach ($this->tags->get($tag) as $dependency) {
+
+            if (!$this->registry->has($dependency)) {
+
+                $issues[] = new Issue(
+                    IssueType::MISSING_DEPENDENCY,
+                    Severity::ERROR,
+                    $path[Runtime\Arr\Inspection::count($path) - 1], // @phpstan-ignore offsetAccess.notFound
+                    "Tagged dependency '$dependency' associated with tag '$tag' is not registered.",
+                    [...$path, $dependency]
+                );
+
+                continue;
+
+            }
+
+            $this->inspect(
+                $dependency,
+                $path,
+                $issues,
+                $reported_cycles
+            );
+
+        }
+
+    }
+
+    /**
+     * ### Inspects collection constructor dependencies
+     *
+     * Recursively validates registered services matching the requested collection element type.
+     *
+     * Service identifiers are resolved to their canonical targets before candidate selection. Duplicate canonical
+     * targets are ignored, preserving the same collection membership rules used by runtime resolution.
+     *
+     * Matching services are inspected without constructing instances or executing factory callbacks.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Registry::all() To retrieve registered service definitions.
+     * @uses \FireHub\Container\Validation\DependencyGraph::canonicalId() To resolve canonical service identifiers.
+     * @uses \FireHub\Container\Validation\DependencyGraph::matchesCollectionType() To check collection compatibility.
+     * @uses \FireHub\Container\Validation\DependencyGraph::inspect() To recursively validate matching dependencies.
+     *
+     * @param class-string $type <p>
+     * Required collection element type.
+     * </p>
+     * @param list<class-string> $path <p>
+     * Active dependency path.
+     * </p>
+     * @param list<\FireHub\Container\Validation\Issue> $issues <p>
+     * Collected validation issues.
+     * </p>
+     * @param array<non-empty-string, true> $reported_cycles <p>
+     * Previously reported dependency cycle signatures.
+     * </p>
+     *
+     * @throws \FireHub\Container\Exception\AmbiguousDependencyException If multiple candidates are eligible.
+     * @throws \FireHub\Container\Exception\ServiceInstantiationException If the union contains an unsupported
+     * intersection member.
+     *
+     * @return void
+     */
+    private function inspectCollectionDependencies (string $type, array $path, array &$issues, array &$reported_cycles):void {
+
+        /** @var array<class-string, true> $resolved */
+        $resolved = [];
+
+        foreach ($this->registry->all() as $id => $definition) {
+
+            $target = $this->canonicalId($id);
+
+            if ($target === null) continue;
+
+            if (isset($resolved[$target])) continue;
+
+            if (!$this->matchesCollectionType($id, $target, $type)) continue;
+
+            $this->inspect(
+                $id,
+                $path,
+                $issues,
+                $reported_cycles
+            );
+
+            $resolved[$target] = true;
+
+        }
+
+    }
+
+    /**
+     * ### Checks collection candidate compatibility
+     *
+     * Determines whether a registered service satisfies the requested collection element type.
+     *
+     * Compatibility is evaluated against the original service identifier, its canonical identifier, and the statically
+     * known implementation type.
+     *
+     * Factory definitions without a statically known implementation are matched only through their service identifiers.
+     * @since 1.0.0
+     *
+     * @uses \FireHub\Container\Internal\TypeMatcher::matches() To check type compatibility.
+     * @uses \FireHub\Container\Registry::find() To retrieve canonical service definitions.
+     *
+     * @param class-string $id <p>
+     * Registered service identifier.
+     * </p>
+     * @param class-string $target <p>
+     * Canonical service identifier.
+     * </p>
+     * @param class-string $type <p>
+     * Required collection element type.
+     * </p>
+     *
+     * @return bool True if the registered service matches the collection element type.
+     */
+    private function matchesCollectionType (string $id, string $target, string $type):bool {
+
+        if ($this->matcher->matches($id, $type))
+            return true;
+
+        if ($this->matcher->matches($target, $type))
+            return true;
+
+        $definition = $this->registry->find($target);
+
+        return match (true) {
+            $definition instanceof Cls => $this->matcher->matches($definition->class, $type),
+            $definition instanceof Instance => $definition->instance instanceof $type,
+            default => false
+        };
 
     }
 

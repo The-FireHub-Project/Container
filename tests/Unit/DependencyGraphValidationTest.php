@@ -19,9 +19,14 @@ use FireHub\Container\Validation\ {
     Issue, IssueType, Result, Severity
 };
 use FireHub\Tests\Container\Stubs\ {
-    CircularA, CircularB,ContextualCircularA, ContextualCircularB, CollectionInjectionConflictingAttributesConsumer,
-    ContextualNamedConsumer, ContextualLogger, ContextualFileLogger, Logger, LoggerInterface, TestFileLogger,
-    ValidationConstructionProbe, ValidationFileLogger
+    CircularA, CircularB, CollectionInjectionConflictingAttributesConsumer, CollectionValidationCircular,
+    CollectionValidationConsumer, CollectionValidationContract, CollectionValidationFirst,
+    CollectionValidationMissingDependency, CollectionValidationNested, CollectionValidationSecond, ContextualCircularA,
+    ContextualCircularB, ContextualFileLogger, ContextualLogger, DnfCacheService, DnfDefaultConsumer, DnfFileLogger,
+    DnfFirstBranchConsumer, DnfNestedConsumer, DnfNoCandidateConsumer, DnfRequiredNullableConsumer,
+    DnfSecondBranchConsumer, DnfSerializableCache, DnfTwoIntersectionsConsumer, DnfUniversalService,
+    IntersectionConsumer, Logger, LoggerInterface, TaggedCircularConsumer, TaggedValidationConsumer, TestFileLogger,
+    TestLogger, UnionA, UnionAmbiguous, UnionB, UnionNullable, UnionOnlyA, ValidationConstructionProbe
 };
 use PHPUnit\Framework\Attributes\ {
     CoversClass, Group, Small
@@ -589,6 +594,753 @@ final class DependencyGraphValidationTest extends FireHubTestCase {
                 IssueType::CIRCULAR_DEPENDENCY
             )
         );
+
+    }
+
+    /**
+     * ### Validates a union dependency with one eligible candidate
+     *
+     * A union dependency with a uniquely selectable implementation must pass static dependency graph validation.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testUnionDependencyWithSingleCandidate ():void {
+
+        $container = new Container;
+
+        $container->singleton(UnionOnlyA::class);
+        $container->singleton(UnionA::class);
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+        self::assertSame(
+            [],
+            $this->issuesOfType(
+                $result,
+                IssueType::AMBIGUOUS_DEPENDENCY
+            )
+        );
+
+    }
+
+    /**
+     * ### Detects ambiguous union dependencies
+     *
+     * Multiple eligible union alternatives must produce an ambiguous dependency validation issue.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testAmbiguousUnionDependency ():void {
+
+        $container = new Container;
+
+        $container->singleton(UnionAmbiguous::class);
+
+        $container->singleton(UnionA::class);
+        $container->singleton(UnionB::class);
+
+        $result = $container->validate();
+
+        self::assertFalse($result->isValid());
+
+        self::assertCount(
+            1,
+            $this->issuesOfType(
+                $result,
+                IssueType::AMBIGUOUS_DEPENDENCY
+            )
+        );
+
+    }
+
+    /**
+     * ### Validates nullable union dependencies with default values
+     *
+     * A nullable union dependency with an explicit default value must remain valid when no dependency candidate is
+     * available.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testNullableUnionDependencyWithDefault ():void {
+
+        $container = new Container;
+
+        $container->singleton(UnionNullable::class);
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+        self::assertSame(
+            [],
+            $this->issuesOfType(
+                $result,
+                IssueType::MISSING_DEPENDENCY
+            )
+        );
+
+    }
+
+    /**
+     * ### Validates an intersection dependency with one eligible candidate
+     *
+     * An intersection dependency must be considered valid when exactly one registered implementation satisfies all
+     * declared contracts.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testIntersectionDependencyWithSingleCandidate ():void {
+
+        $container = new Container;
+
+        $container->singleton(IntersectionConsumer::class);
+        $container->singleton(TestFileLogger::class);
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+        self::assertSame(
+            [],
+            $this->issuesOfType(
+                $result,
+                IssueType::MISSING_DEPENDENCY
+            )
+        );
+
+    }
+
+    /**
+     * ### Detects missing intersection dependencies
+     *
+     * An intersection dependency without an implementation satisfying every required contract must produce a missing
+     * dependency issue.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testIntersectionDependencyWithoutCandidate ():void {
+
+        $container = new Container;
+
+        $container->singleton(IntersectionConsumer::class);
+
+        $result = $container->validate();
+
+        self::assertFalse($result->isValid());
+
+        self::assertCount(
+            1,
+            $this->issuesOfType(
+                $result,
+                IssueType::MISSING_DEPENDENCY
+            )
+        );
+
+    }
+
+    /**
+     * ### Validates the first DNF intersection branch
+     *
+     * A DNF dependency must pass validation when one registered implementation satisfies the first intersection branch.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testDnfFirstBranchValidation ():void {
+
+        $container = new Container;
+
+        $container->singleton(DnfFirstBranchConsumer::class);
+        $container->singleton(DnfFileLogger::class);
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+    }
+
+    /**
+     * ### Validates the second DNF-named branch
+     *
+     * A DNF dependency must pass validation when one registered implementation satisfies its named alternative.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testDnfSecondBranchValidation ():void {
+
+        $container = new Container;
+
+        $container->singleton(DnfSecondBranchConsumer::class);
+        $container->singleton(DnfCacheService::class);
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+    }
+
+    /**
+     * ### Validates a DNF dependency containing two intersection branches
+     *
+     * A registered implementation satisfying either complete intersection branch must be accepted by dependency
+     * graph validation.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testDnfTwoIntersectionBranches ():void {
+
+        $container = new Container;
+
+        $container->singleton(DnfTwoIntersectionsConsumer::class);
+        $container->singleton(DnfSerializableCache::class);
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+    }
+
+    /**
+     * ### Validates an implementation satisfying multiple DNF branches
+     *
+     * A single registered implementation satisfying more than one DNF branch must not be considered ambiguous.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testDnfSingleImplementationMatchingMultipleBranches ():void {
+
+        $container = new Container;
+
+        $container->singleton(DnfTwoIntersectionsConsumer::class);
+        $container->singleton(DnfUniversalService::class);
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+    }
+
+    /**
+     * ### Detects ambiguous DNF dependencies
+     *
+     * Multiple registered implementations satisfying different DNF alternatives must produce an ambiguous dependency
+     * issue.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testAmbiguousDnfDependency ():void {
+
+        $container = new Container;
+
+        $container->singleton(DnfFirstBranchConsumer::class);
+
+        $container->singleton(DnfFileLogger::class);
+        $container->singleton(DnfCacheService::class);
+
+        $result = $container->validate();
+
+        self::assertFalse($result->isValid());
+
+        self::assertCount(
+            1,
+            $this->issuesOfType(
+                $result,
+                IssueType::AMBIGUOUS_DEPENDENCY
+            )
+        );
+
+    }
+
+    /**
+     * ### Detects missing DNF dependency candidates
+     *
+     * A required DNF dependency must produce a missing dependency issue when no registered implementation satisfies
+     * any complete branch.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testMissingDnfDependency ():void {
+
+        $container = new Container;
+
+        $container->singleton(DnfNoCandidateConsumer::class);
+
+        $result = $container->validate();
+
+        self::assertFalse($result->isValid());
+
+        self::assertCount(
+            1,
+            $this->issuesOfType(
+                $result,
+                IssueType::MISSING_DEPENDENCY
+            )
+        );
+
+    }
+
+    /**
+     * ### Accepts a DNF dependency with a null default
+     *
+     * A DNF constructor parameter with an explicit null default must remain valid when no eligible implementation is
+     * registered.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testDnfDependencyWithNullDefault ():void {
+
+        $container = new Container;
+
+        $container->singleton(DnfDefaultConsumer::class);
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+    }
+
+    /**
+     * ### Rejects a required nullable DNF dependency without candidates
+     *
+     * Nullable constructor parameters without explicit default values remain required and must produce a missing
+     * dependency issue.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testRequiredNullableDnfDependency ():void {
+
+        $container = new Container;
+
+        $container->singleton(DnfRequiredNullableConsumer::class);
+
+        $result = $container->validate();
+
+        self::assertFalse($result->isValid());
+
+        self::assertCount(
+            1,
+            $this->issuesOfType(
+                $result,
+                IssueType::MISSING_DEPENDENCY
+            )
+        );
+
+    }
+
+    /**
+     * ### Validates nested DNF constructor dependencies
+     *
+     * Dependency graph validation must recursively inspect constructor dependencies selected through DNF types.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testNestedDnfDependencyGraph ():void {
+
+        $container = new Container;
+
+        $container->singleton(DnfNestedConsumer::class);
+        $container->singleton(DnfFileLogger::class);
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+        self::assertSame(
+            [],
+            $this->issuesOfType(
+                $result,
+                IssueType::MISSING_DEPENDENCY
+            )
+        );
+
+    }
+
+    /**
+     * ### Validates an empty tagged collection
+     *
+     * An unknown tag must produce an empty collection without introducing
+     * missing dependency validation issues.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testEmptyTaggedCollectionValidation ():void {
+
+        $container = new Container;
+
+        $container->singleton(TaggedValidationConsumer::class);
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+        self::assertSame(
+            [],
+            $this->issuesOfType($result, IssueType::MISSING_DEPENDENCY)
+        );
+
+    }
+
+    /**
+     * ### Validates multiple tagged services
+     *
+     * Every tagged service must be included in dependency graph validation.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testMultipleTaggedServicesValidation ():void {
+
+        $container = new Container;
+
+        $container->singleton(TaggedValidationConsumer::class);
+        $container->singleton(Logger::class);
+        $container->singleton(ValidationConstructionProbe::class);
+
+        $container->tag(
+            'validation.services',
+            Logger::class,
+            ValidationConstructionProbe::class
+        );
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+    }
+
+    /**
+     * ### Detects circular dependencies through tagged injection
+     *
+     * Tagged collection traversal must preserve the active dependency path
+     * so that circular dependencies are detected.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testCircularTaggedDependencyValidation ():void {
+
+        $container = new Container;
+
+        $container->singleton(TaggedCircularConsumer::class);
+
+        $container->tag(
+            'validation.circular',
+            TaggedCircularConsumer::class
+        );
+
+        $result = $container->validate();
+
+        self::assertFalse($result->isValid());
+
+        self::assertCount(
+            1,
+            $this->issuesOfType($result, IssueType::CIRCULAR_DEPENDENCY)
+        );
+
+    }
+
+    /**
+     * ### Validates tagged aliases
+     *
+     * Tagged aliases must be resolved to their canonical service definitions during dependency graph validation.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testTaggedAliasValidation ():void {
+
+        $container = new Container;
+
+        $container->singleton(TaggedValidationConsumer::class);
+        $container->singleton(TestFileLogger::class);
+
+        $container->alias(
+            TestLogger::class,
+            TestFileLogger::class
+        );
+
+        $container->tag(
+            'validation.services',
+            TestLogger::class
+        );
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+    }
+
+    /**
+     * ### Does not execute tagged factories during validation
+     *
+     * Factory callbacks must never be executed while inspecting tagged constructor dependencies.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testTaggedFactoryIsNotExecutedDuringValidation ():void {
+
+        $executed = false;
+
+        $container = new Container;
+
+        $container->singleton(TaggedValidationConsumer::class);
+
+        $container->factory(
+            LoggerInterface::class,
+            function ($resolver) use (&$executed):object {
+
+                $executed = true;
+
+                return new Logger;
+
+            }
+        );
+
+        $container->tag(
+            'validation.services',
+            LoggerInterface::class
+        );
+
+        $container->validate();
+
+        self::assertFalse($executed);
+
+    }
+
+    /**
+     * ### Validates an empty collection dependency
+     *
+     * Collection injection must remain valid when no matching service implementations are registered.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testEmptyCollectionDependencyValidation ():void {
+
+        $container = new Container;
+
+        $container->singleton(CollectionValidationConsumer::class);
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+    }
+
+    /**
+     * ### Validates a collection with one implementation
+     *
+     * A collection containing one compatible registered implementation must pass static validation.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testSingleCollectionImplementationValidation ():void {
+
+        $container = new Container;
+
+        $container->singleton(CollectionValidationConsumer::class);
+        $container->singleton(CollectionValidationFirst::class);
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+    }
+
+    /**
+     * ### Validates a collection with multiple implementations
+     *
+     * All compatible registered implementations must be accepted without producing ambiguity errors.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testMultipleCollectionImplementationsValidation ():void {
+
+        $container = new Container;
+
+        $container->singleton(CollectionValidationConsumer::class);
+        $container->singleton(CollectionValidationFirst::class);
+        $container->singleton(CollectionValidationSecond::class);
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+        self::assertSame(
+            [],
+            $this->issuesOfType($result, IssueType::AMBIGUOUS_DEPENDENCY)
+        );
+
+    }
+
+    /**
+     * ### Ignores unrelated collection implementations
+     *
+     * Services that do not satisfy the requested collection element type must not affect collection validation.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testUnrelatedCollectionImplementationValidation ():void {
+
+        $container = new Container;
+
+        $container->singleton(CollectionValidationConsumer::class);
+        $container->singleton(Logger::class);
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+    }
+
+    /**
+     * ### Validates collection aliases without duplicate traversal
+     *
+     * Multiple identifiers resolving to the same canonical service must not introduce duplicate dependency issues.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testCollectionAliasDeduplicationValidation ():void {
+
+        $container = new Container;
+
+        $container->singleton(CollectionValidationConsumer::class);
+        $container->singleton(CollectionValidationFirst::class);
+
+        $container->alias(
+            CollectionValidationContract::class,
+            CollectionValidationFirst::class
+        );
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
+
+    }
+
+    /**
+     * ### Detects circular dependencies through collection injection
+     *
+     * A service included in its own injected collection must produce a circular dependency validation issue.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testCircularCollectionDependencyValidation ():void {
+
+        $container = new Container;
+
+        $container->singleton(CollectionValidationCircular::class);
+
+        $result = $container->validate();
+
+        self::assertFalse($result->isValid());
+
+        self::assertCount(
+            1,
+            $this->issuesOfType($result, IssueType::CIRCULAR_DEPENDENCY)
+        );
+
+    }
+
+    /**
+     * ### Detects missing dependencies inside collection members
+     *
+     * Collection validation must recursively inspect selected implementations and report unresolved required
+     * constructor dependencies.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testMissingCollectionMemberDependencyValidation ():void {
+
+        $container = new Container;
+
+        $container->singleton(CollectionValidationConsumer::class);
+        $container->singleton(CollectionValidationMissingDependency::class);
+
+        $result = $container->validate();
+
+        self::assertFalse($result->isValid());
+
+        self::assertNotEmpty(
+            $this->issuesOfType($result, IssueType::MISSING_DEPENDENCY)
+        );
+
+    }
+
+    /**
+     * ### Does not execute collection factories during validation
+     *
+     * Static collection validation must never invoke registered factory callbacks.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testCollectionFactoryIsNotExecutedDuringValidation ():void {
+
+        $executed = false;
+
+        $container = new Container;
+
+        $container->singleton(CollectionValidationConsumer::class);
+
+        $container->factory(
+            CollectionValidationContract::class,
+            function ($resolver) use (&$executed):object {
+
+                $executed = true;
+
+                return new CollectionValidationFirst;
+
+            }
+        );
+
+        $container->validate();
+
+        self::assertFalse($executed);
+
+    }
+
+    /**
+     * ### Validates nested collection dependencies
+     *
+     * Collection injection must be analyzed recursively when encountered inside nested constructor dependency graphs.
+     * @since 1.0.0
+     *
+     * @return void
+     */
+    public function testNestedCollectionDependencyValidation ():void {
+
+        $container = new Container;
+
+        $container->singleton(CollectionValidationNested::class);
+        $container->singleton(CollectionValidationFirst::class);
+
+        $result = $container->validate();
+
+        self::assertTrue($result->isValid());
 
     }
 
