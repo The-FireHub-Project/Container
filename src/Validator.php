@@ -14,7 +14,7 @@
 namespace FireHub\Container;
 
 use FireHub\Container\Validation\ {
-    ContextualBinding, DependencyGraph, Issue, IssueType, ParameterBinding, Result, Severity
+    ContextualBinding, DependencyGraph, Issue, IssueType, Lifetime, ParameterBinding, Result, Severity
 };
 use FireHub\Container\Definition\ {
     Alias, Cls, Factory, Instance
@@ -80,6 +80,8 @@ final readonly class Validator {
      *
      * @uses \FireHub\Container\Validation\DependencyGraph::validate() To validate dependency graphs.
      * @uses \FireHub\Container\Internal\ParameterBinding::validate() To validate parameter bindings.
+     * @uses \FireHub\Container\Internal\ContextualBinding::validate() To validate contextual bindings.
+     * @uses \FireHub\Container\Internal\Lifetime::validate() To validate service lifetimes.
      * @uses \FireHub\Container\Registry::all() To retrieve all registered service definitions.
      * @uses \FireHub\Container\Validator::validateClass() To validate class-based definitions.
      * @uses \FireHub\Container\Validator::validateInstance() To validate existing instance definitions.
@@ -144,6 +146,13 @@ final readonly class Validator {
         )->validate();
 
         Runtime\Arr\Mutation::push($issues, ...$contextual_issues);
+
+        $lifetime_issues = new Lifetime(
+            $this->registry,
+            $this->bindings
+        )->validate();
+
+        Runtime\Arr\Mutation::push($issues, ...$lifetime_issues);
 
         /** @var list<\FireHub\Container\Validation\Issue> $issues */
         return new Result($issues);
