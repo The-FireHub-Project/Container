@@ -3,7 +3,7 @@
   "description": "A modular dependency injection container for The FireHub Project, providing service registration, dependency resolution, lifecycle management, and extensible service definitions.",
   "type": "library",
   "keywords": ["php", "framework", "kernel", "firehub", "dependency-injection", "lifecycle", "bootstrap"],
-  "homepage": "https://the-firehub-project.github.io/kernel",
+  "homepage": "https://the-firehub-project.github.io/container",
   "license": "Apache-2.0",
   "require": {
     "php": "^8.5",
